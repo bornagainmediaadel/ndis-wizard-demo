@@ -2205,6 +2205,8 @@ render();
    through the page's Claude capability; anywhere else it calls the API directly. */
 (function(){'use strict';
 const LCFG={project:'qzzlxhreshuxahocllwm',fn:'https://qzzlxhreshuxahocllwm.supabase.co/functions/v1/ndis-wizard',
+  // Testing convenience: sign everyone in as a demo Director automatically. Remove `auto` to require sign-in again.
+  auto:['demo@demo.ndiswizard.au','auto-signin-demo'],
   accounts:[['saleha@abilityalliancecare.com.au','Director'],['teamleader@demo.ndiswizard.au','Team leader'],['finance@demo.ndiswizard.au','Finance'],['compliance@demo.ndiswizard.au','Compliance officer'],['rostering@demo.ndiswizard.au','Rostering coordinator']]};
 const SAMPLE={
  invoices_csv:"invoice,line_id,shift_id,client,support_item,date,hours,unit_price,amount\nINV-TEST-01,127,SH-900141,Alex Example,01_011_0107_1_1,2026-10-09,2.5,70.23,175.58\nINV-TEST-01,128,SH-900141,Alex Example,01_011_0107_1_1,2026-10-09,2.5,70.23,175.58\nINV-TEST-01,129,SH-900166,Alex Example,01_011_0107_1_1,2026-10-12,4,70.23,280.92\nINV-TEST-01,130,SH-900186,Alex Example,01_011_0107_1_1,2026-10-14,2.5,85,212.5\nINV-TEST-01,131,SH-900197,Alex Example,01_011_0107_1_1,2026-10-15,2.5,70.23,175.58",
@@ -2295,6 +2297,7 @@ async function ensureBoot(){if(L.boot)return;L.boot=true;
  if(window.claude&&window.claude.use){try{const r=await Promise.all([window.claude.use('mcp'),window.claude.use('sample')]);L.mcp=r[0];L.sample=r[1]}catch(e){}}
  L.mode=L.mcp?'mcp':'fetch';
  if(L.session){try{await afterLogin()}catch(e){L.session=null;ls.set('wiz.session',null)}}
+ if(!L.session&&LCFG.auto&&ls.get('wiz.noauto')!=='1'){try{const r=await raw('POST','/login',{username:LCFG.auto[0],password:LCFG.auto[1]});if(r.status===200){L.session=r.body.token;ls.set('wiz.session',L.session);await afterLogin()}}catch(e){}}
  L.ready=true;rerender()}
 async function afterLogin(){L.me=await api('/me');L.reg=await api('/registry');
  api('/status').then(s=>{L.status={ok:1,ms:s.latency_ms};rerender()}).catch(e=>{L.status={err:e.message};rerender()});count()}
@@ -2373,8 +2376,8 @@ async function run(key,fn){L.busy[key]=1;delete L.err[key];rerender();try{await 
 const prog=k=>p=>{L.msg['p'+k]=p;const el=document.querySelector('.lprog');if(el)el.textContent=p};
 async function act(a,d){
  if(a==='pickacct'){L.f.lu=d.u;rerender();return}
- if(a==='login')return run('login',async()=>{const r=await raw('POST','/login',{username:(L.f.lu||'').trim(),password:L.f.lp||''});if(r.status!==200)throw new Error((r.body&&r.body.error)||'Sign-in failed.');L.session=r.body.token;ls.set('wiz.session',L.session);L.f.lp='';await afterLogin();toast('Signed in as '+r.body.name,'check')});
- if(a==='logout'){raw('POST','/logout',{}).catch(()=>{});L.session=null;L.me=null;ls.set('wiz.session',null);rerender();return}
+ if(a==='login')return run('login',async()=>{const r=await raw('POST','/login',{username:(L.f.lu||'').trim(),password:L.f.lp||''});if(r.status!==200)throw new Error((r.body&&r.body.error)||'Sign-in failed.');L.session=r.body.token;ls.set('wiz.session',L.session);ls.set('wiz.noauto',null);L.f.lp='';await afterLogin();toast('Signed in as '+r.body.name,'check')});
+ if(a==='logout'){ls.set('wiz.noauto','1');raw('POST','/logout',{}).catch(()=>{});L.session=null;L.me=null;ls.set('wiz.session',null);rerender();return}
  if(a==='notesref'){L.notes=null;rerender();return}
  if(a==='note'){const n=(L.notes||[]).find(x=>x.id===d.id);L.noteSel=d.id;L.f.nmsg=n.message;L.f.ncl=n.client;L.f.nst=n.staff;rerender();return}
  if(a==='ncheck')return run('ncheck',async()=>{const sel=(L.notes||[]).find(x=>x.id===L.noteSel);const body=sel&&L.f.nmsg===sel.message?{note_id:sel.id}:{note:{message:L.f.nmsg||'',client:L.f.ncl||'',staff:L.f.nst||''}};const it=await api('/notes/check',body);L.out.notes={items:[it]};L.msg_n=`${it.flags.length} flag(s). Added to the review queue for the team leader.`});

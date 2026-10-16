@@ -4,4 +4,4 @@ The NDIS Wizard demo app (original design) with a **Live agents · ShiftCare** s
 
 **Clancy · Xero** compares the ShiftCare clone with a mock Xero organisation (Accounting and Payroll AU) that the clone syncs to the way ShiftCare's Xero integration does. It lists invoices, payments, contacts, staff links, pay item mappings and timesheets that disagree between the two systems.
 
-Open the site, go to **Live agents** in the sidebar, pick an approver role and sign in with the demo password.
+Open the site and go to **Live agents** in the sidebar. For testing, the page signs in automatically as a demo Director; sign out to pick another role.
