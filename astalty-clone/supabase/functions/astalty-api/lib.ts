@@ -1,4 +1,5 @@
 // Astalty clone · shared helpers (Deno / Supabase edge runtime)
+import { SORTS } from "./sorts.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 export const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
@@ -53,6 +54,8 @@ export async function authenticate(req: Request): Promise<Key> {
 export type Ctx = {
   req: Request; method: string; path: string; url: URL; query: URLSearchParams;
   params: Record<string, string>; body: any; key: Key | null; base: string;
+  /** The route pattern that matched (set by the router); selects the endpoint's allowed sorts. */
+  pattern?: string;
 };
 
 export function q(c: Ctx, name: string): string | null { const v = c.query.get(name); return v === null || v === "" ? null : v; }
@@ -69,14 +72,17 @@ export function paging(c: Ctx, defaultSize = 15): Page {
 export function listOf(data: unknown[], total: number, p: Page, allowedSorts: string[] = []) {
   return { data, meta: { current_page: p.number, last_page: Math.max(1, Math.ceil(total / p.size)), per_page: p.size, total, allowed_sorts: allowedSorts } };
 }
-/** Parse `sort=-start_time` against an allow-list; returns [column, ascending]. */
+/** Parse `sort=-start_time` against the endpoint's allowed sorts (the live API's list when known); returns [column, ascending]. */
 export function sortOf(c: Ctx, allowed: Record<string, string>, def: string): [string, boolean] {
-  const raw = q(c, "sort") || def;
+  const names = (c.pattern && SORTS[c.pattern]) || allowed;
+  const raw = q(c, "sort");
+  if (!raw) { const desc = def.startsWith("-"); const n = desc ? def.slice(1) : def; return [allowed[n] ?? names[n] ?? n, !desc]; }
   const desc = raw.startsWith("-");
   const name = desc ? raw.slice(1) : raw;
-  if (!allowed[name]) throw invalidSort(raw, Object.keys(allowed));
-  return [allowed[name], !desc];
+  if (!names[name]) throw invalidSort(raw, Object.keys(names));
+  return [names[name], !desc];
 }
+export function allowedSorts(pattern?: string) { return pattern && SORTS[pattern] ? Object.keys(SORTS[pattern]) : null; }
 export async function run<T = any>(query: any, p: Page): Promise<{ rows: T[]; total: number }> {
   const r = await query.range(p.from, p.to);
   return { rows: must(r) as T[], total: r.count ?? 0 };

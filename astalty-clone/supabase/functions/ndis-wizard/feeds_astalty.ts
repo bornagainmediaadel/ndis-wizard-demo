@@ -4,19 +4,30 @@
 import { BudgetError, ShiftCare, pool } from "./shiftcare.ts";
 import type { Line, Shift } from "./clancy.ts";
 import type { Doc } from "./cleo.ts";
-import { addDays, adlDate, adlTime, round2, toCsv } from "./util.ts";
+import { addDays, round2, toCsv } from "./util.ts";
+
+// Dates and times are shown in the account's own timezone. Astalty stores calendar dates as local
+// midnight in that zone (so a plan that starts on the 20th arrives as the 19th, 13:00 UTC for a
+// Sydney account); the zone is learned from the first support seen and defaults to Adelaide,
+// which is where the clone and the demo live.
+let ACCOUNT_TZ = "";
+const tz = () => ACCOUNT_TZ || "Australia/Adelaide";
+const lDate = (d: Date | string = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: tz(), year: "numeric", month: "2-digit", day: "2-digit" }).format(typeof d === "string" ? new Date(d) : d);
+const lTime = (d: Date | string) => new Intl.DateTimeFormat("en-GB", { timeZone: tz(), hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(typeof d === "string" ? new Date(d) : d);
+const learnTz = (rows: any[]) => { const t = (rows || []).find((r) => r?.timezone)?.timezone; if (t) ACCOUNT_TZ = t; return rows; };
 
 const V = "/public/v1";
 const money = (cents: unknown) => round2(Number(cents || 0) / 100);
 const pname = (p: any) => p?.full_name || p?.name || [p?.first_name, p?.last_name].filter(Boolean).join(" ");
 const uname = (u: any) => u?.name || [u?.first_name, u?.last_name].filter(Boolean).join(" ");
 const CRITICAL = /screening|first aid|cpr|manual handling|medication|driver|licen[cs]e|wwcc|working with children/i;
-const day = (iso: string | null | undefined) => (iso ? adlDate(iso) : "");
+const day = (iso: string | null | undefined) => (iso ? lDate(iso) : "");
 
 export async function people(sc: ShiftCare) {
   const [staff, clients] = await Promise.all([
     sc.all(`${V}/users`, "data", {}),
     sc.all(`${V}/participants`, "data", { "filter[status]": "active,archived" }),
+    sc.get(`${V}/supports`, { "page[size]": 1 }).then((b: any) => learnTz(b?.data)).catch(() => null), // learn the account's timezone
   ]);
   return {
     staff, clients,
@@ -53,7 +64,7 @@ export function noteShape(n: any) {
   const p = n._participant;
   return {
     id: `${p?.id ?? ""}:${n.id}`, category: n.source_type || "note", message: n.content, shift_id: n.source?.id ? String(n.source.id) : null,
-    shift_date: n.created_at ? adlDate(n.created_at) : null, client: pname(p), staff: uname(n.author),
+    shift_date: n.created_at ? lDate(n.created_at) : null, client: pname(p), staff: uname(n.author),
     client_id: p?.id ? String(p.id) : null, staff_id: n.author?.id ? String(n.author.id) : null, created_at: n.created_at,
   };
 }
@@ -69,8 +80,8 @@ export async function noteById(sc: ShiftCare, id: string) {
   if (note.shift_id && hit.source_type === "support") {
     try { shift = (await sc.get(`${V}/supports/${note.shift_id}`))?.data; } catch (e) { if (e instanceof BudgetError) throw e; shift = null; }
   }
-  if (shift) note.shift_date = adlDate(shift.start_time);
-  return { note, shift: shift ? { start: adlTime(shift.start_time), end: adlTime(shift.end_time), date: adlDate(shift.start_time) } : null };
+  if (shift) note.shift_date = lDate(shift.start_time);
+  return { note, shift: shift ? { start: lTime(shift.start_time), end: lTime(shift.end_time), date: lDate(shift.start_time) } : null };
 }
 
 // ---------- Clancy ----------
@@ -81,10 +92,10 @@ function supportToShift(s: any): Shift {
     if (!sh.clock_in_at || !sh.clock_out_at) continue;
     const brk = (sh.breaks || []).filter((b: any) => !b.is_paid).reduce((a: number, b: any) => a + (Number(b.duration) || 0), 0);
     const mins = (Date.parse(sh.clock_out_at) - Date.parse(sh.clock_in_at)) / 60000 - brk;
-    worked.push({ staff: uname(sh.user), clock_in: adlTime(sh.clock_in_at), clock_out: adlTime(sh.clock_out_at), hours: round2(mins / 60) });
+    worked.push({ staff: uname(sh.user), clock_in: lTime(sh.clock_in_at), clock_out: lTime(sh.clock_out_at), hours: round2(mins / 60) });
   }
   return {
-    shift_id: String(s.id), date: adlDate(s.start_time), start: adlTime(s.start_time), end: adlTime(s.end_time),
+    shift_id: String(s.id), date: lDate(s.start_time), start: lTime(s.start_time), end: lTime(s.end_time),
     client: pname(s.participant), staff: shifts.map((sh) => uname(sh.user)).filter(Boolean).join(", "),
     worked, has_timesheet: shifts.some((sh) => sh.clock_in_at),
     kms: (s.travels || []).reduce((a: number, t: any) => a + (Number(t.actual_distance ?? t.distance) || 0), 0),
@@ -114,7 +125,7 @@ export async function invoiceFeed(sc: ShiftCare, refs: string[] | "all") {
   const dates = [...new Set(lines.map((l) => l.date).filter(Boolean))].sort();
   const shifts = new Map<string, Shift>();
   if (dates.length) {
-    const sups = await sc.all(`${V}/supports`, "data", { "filter[start_after]": dates[0], "filter[start_before]": dates[dates.length - 1], sort: "start_time" });
+    const sups = learnTz(await sc.all(`${V}/supports`, "data", { "filter[start_after]": dates[0], "filter[start_before]": dates[dates.length - 1], sort: "start_time" }));
     for (const s of sups) shifts.set(String(s.id), supportToShift(s));
   }
   return {
@@ -153,13 +164,13 @@ export async function liveInputs(sc: ShiftCare, key: string, today: string, now:
   if (key === "rory") {
     const to = addDays(today, 7);
     const [sups, { staff }, records] = await Promise.all([
-      sc.all(`${V}/supports`, "data", { "filter[start_after]": today, "filter[start_before]": to, sort: "start_time" }),
+      sc.all(`${V}/supports`, "data", { "filter[start_after]": today, "filter[start_before]": to, sort: "start_time" }).then(learnTz),
       people(sc), sc.all(`${V}/user-records`, "data", {}),
     ]);
     const live = sups.filter((s: any) => !supportToShift(s).cancelled);
     const vacant = live.filter((s: any) => !(s.shifts || []).some((sh: any) => sh.user));
     const rostered = new Map<string, string[]>();
-    for (const s of live) for (const sh of s.shifts || []) if (sh.user) rostered.set(String(sh.user.id), [...(rostered.get(String(sh.user.id)) || []), `${adlDate(s.start_time)} ${adlTime(s.start_time)}-${adlTime(s.end_time)}`]);
+    for (const s of live) for (const sh of s.shifts || []) if (sh.user) rostered.set(String(sh.user.id), [...(rostered.get(String(sh.user.id)) || []), `${lDate(s.start_time)} ${lTime(s.start_time)}-${lTime(s.end_time)}`]);
     const tags = new Map<string, string[]>();
     for (const r of records) {
       if (r.expiry_date && day(r.expiry_date) < today) continue;
@@ -169,7 +180,7 @@ export async function liveInputs(sc: ShiftCare, key: string, today: string, now:
     }
     const workers = staff.filter((s: any) => s.status === "active");
     return {
-      vacant: toCsv(vacant.map((s: any) => ({ shift_id: s.id, client: pname(s.participant) || "No participant", date: adlDate(s.start_time), start: adlTime(s.start_time), end: adlTime(s.end_time), location: s.site?.name || s.address_state || "", needs: "screening", preferred_staff: "" })), ["shift_id", "client", "date", "start", "end", "location", "needs", "preferred_staff"]),
+      vacant: toCsv(vacant.map((s: any) => ({ shift_id: s.id, client: pname(s.participant) || "No participant", date: lDate(s.start_time), start: lTime(s.start_time), end: lTime(s.end_time), location: s.site?.name || s.address_state || "", needs: "screening", preferred_staff: "" })), ["shift_id", "client", "date", "start", "end", "location", "needs", "preferred_staff"]),
       staff: toCsv(workers.map((s: any) => ({ staff: uname(s), phone: "", available: "", do_not_send: "", quals: (tags.get(String(s.id)) || []).join(";"), already_rostered: (rostered.get(String(s.id)) || []).join(";") })), ["staff", "phone", "available", "do_not_send", "quals", "already_rostered"]),
     };
   }
@@ -177,14 +188,14 @@ export async function liveInputs(sc: ShiftCare, key: string, today: string, now:
     const from = key === "sunny" ? addDays(today, -1) : addDays(today, -7);
     const to = key === "sunny" ? today : addDays(today, -1);
     const [sups, { clients }] = await Promise.all([
-      sc.all(`${V}/supports`, "data", { "filter[start_after]": from, "filter[start_before]": to, sort: "start_time" }), people(sc),
+      sc.all(`${V}/supports`, "data", { "filter[start_after]": from, "filter[start_before]": to, sort: "start_time" }).then(learnTz), people(sc),
     ]);
     const rows: any[] = [];
     for (const s of sups.filter((x: any) => !supportToShift(x).cancelled)) for (const sh of s.shifts || []) if (sh.user && !/cancel/i.test(sh.status || "")) rows.push({ s, sh });
     if (key === "lenny") {
       return {
-        roster: toCsv(rows.map(({ s, sh }) => ({ shift_id: s.id, staff: uname(sh.user), date: adlDate(s.start_time), start: adlTime(s.start_time), end: adlTime(s.end_time) })), ["shift_id", "staff", "date", "start", "end"]),
-        timesheets: toCsv(rows.filter((r) => r.sh.clock_in_at).map(({ s, sh }) => ({ shift_id: s.id, staff: uname(sh.user), date: adlDate(s.start_time), clock_in: adlTime(sh.clock_in_at), clock_out: sh.clock_out_at ? adlTime(sh.clock_out_at) : "", kms: (s.travels || []).reduce((a: number, t: any) => a + (Number(t.actual_distance ?? t.distance) || 0), 0), allowances: "" })), ["shift_id", "staff", "date", "clock_in", "clock_out", "kms", "allowances"]),
+        roster: toCsv(rows.map(({ s, sh }) => ({ shift_id: s.id, staff: uname(sh.user), date: lDate(s.start_time), start: lTime(s.start_time), end: lTime(s.end_time) })), ["shift_id", "staff", "date", "start", "end"]),
+        timesheets: toCsv(rows.filter((r) => r.sh.clock_in_at).map(({ s, sh }) => ({ shift_id: s.id, staff: uname(sh.user), date: lDate(s.start_time), clock_in: lTime(sh.clock_in_at), clock_out: sh.clock_out_at ? lTime(sh.clock_out_at) : "", kms: (s.travels || []).reduce((a: number, t: any) => a + (Number(t.actual_distance ?? t.distance) || 0), 0), allowances: "" })), ["shift_id", "staff", "date", "clock_in", "clock_out", "kms", "allowances"]),
       };
     }
     const notes = await notesFor(sc, activeClients(clients), { source: "support", from, maxPages: 1 });
@@ -192,8 +203,8 @@ export async function liveInputs(sc: ShiftCare, key: string, today: string, now:
     return {
       shifts: toCsv(rows.map(({ s, sh }) => ({
         shift_id: s.id, client: pname(s.participant), staff: uname(sh.user), phone: "",
-        date: adlDate(s.start_time), start: adlTime(s.start_time), end: adlTime(s.end_time),
-        clocked_in: sh.clock_in_at ? adlTime(sh.clock_in_at) : "", note_submitted: noted.has(String(s.id)) ? "yes" : "no",
+        date: lDate(s.start_time), start: lTime(s.start_time), end: lTime(s.end_time),
+        clocked_in: sh.clock_in_at ? lTime(sh.clock_in_at) : "", note_submitted: noted.has(String(s.id)) ? "yes" : "no",
       })), ["shift_id", "client", "staff", "phone", "date", "start", "end", "clocked_in", "note_submitted"]),
       now,
     };
@@ -201,7 +212,7 @@ export async function liveInputs(sc: ShiftCare, key: string, today: string, now:
   if (key === "wizard") {
     const { clients } = await people(sc);
     const notes = await notesFor(sc, activeClients(clients), { from: addDays(today, -28), to: today, maxPages: 3 });
-    return { notes: toCsv(notes.map((n: any) => ({ date: adlDate(n.created_at), participant: pname(n._participant), note: n.content })), ["date", "participant", "note"]) };
+    return { notes: toCsv(notes.map((n: any) => ({ date: lDate(n.created_at), participant: pname(n._participant), note: n.content })), ["date", "participant", "note"]) };
   }
   if (key === "archie") {
     const [{ clients }, records, sigs] = await Promise.all([people(sc), sc.all(`${V}/participant-records`, "data", {}), sc.all(`${V}/signature-requests`, "data", {})]);
@@ -231,7 +242,7 @@ export async function liveInputs(sc: ShiftCare, key: string, today: string, now:
     const body: any = await sc.get(`${V}/incidents`, { "page[size]": 50 });
     const inc = (body?.data || []).find((i: any) => !/closed|resolved|complete/i.test(i.status || "")) || (body?.data || [])[0];
     if (!inc) return {};
-    return { text: `${inc.reference}, ${adlDate(inc.time)} ${adlTime(inc.time)}. ${inc.details}`, participant: "", staff: "" };
+    return { text: `${inc.reference}, ${lDate(inc.time)} ${lTime(inc.time)}. ${inc.details}`, participant: "", staff: "" };
   }
   throw new Error(`${key} has no Astalty feed yet. Paste or upload the CSV instead.`);
 }
@@ -245,8 +256,8 @@ export async function heyContext(sc: ShiftCare, intent: string, today: string) {
     return { kind: "invoices", rows: inv.map((i: any) => ({ ref: i.number, status: day(i.due_date) < today ? "overdue" : "unpaid", client: pname(clientById.get(String(i.participant?.id))), total: money(i.total), balance: money(i.total), due: day(i.due_date) })) };
   }
   if (intent === "shifts") {
-    const sups = await sc.all(`${V}/supports`, "data", { "filter[start_after]": today, "filter[start_before]": addDays(today, 1), sort: "start_time" });
-    return { kind: "shifts", rows: sups.filter((s: any) => !supportToShift(s).cancelled).map((s: any) => ({ id: s.id, date: adlDate(s.start_time), start: adlTime(s.start_time), end: adlTime(s.end_time), clients: [pname(s.participant)].filter(Boolean), staff: (s.shifts || []).map((sh: any) => uname(sh.user)).filter(Boolean), vacant: !(s.shifts || []).some((sh: any) => sh.user) })) };
+    const sups = learnTz(await sc.all(`${V}/supports`, "data", { "filter[start_after]": today, "filter[start_before]": addDays(today, 1), sort: "start_time" }));
+    return { kind: "shifts", rows: sups.filter((s: any) => !supportToShift(s).cancelled).map((s: any) => ({ id: s.id, date: lDate(s.start_time), start: lTime(s.start_time), end: lTime(s.end_time), clients: [pname(s.participant)].filter(Boolean), staff: (s.shifts || []).map((sh: any) => uname(sh.user)).filter(Boolean), vacant: !(s.shifts || []).some((sh: any) => sh.user) })) };
   }
   if (intent === "incidents") {
     const rows: any[] = await sc.all(`${V}/incidents`, "data", {});

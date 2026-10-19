@@ -60,7 +60,7 @@ export const budgetItem = (i: any) => ({
 export const budgetPeriod = (p: any) => ({ id: p.id, start: dateOnly(p.start), end: dateOnly(p.end), amount: cents(p.amount) });
 export const goal = (g: any) => ({ id: g.id, name: g.name, description: g.description, status: g.status, goal_type: g.goal_type, barriers: g.barriers, achievement_strategy: g.achievement_strategy, achieved_at: iso(g.achieved_at), archived_at: iso(g.archived_at), created_at: iso(g.created_at) });
 export const note = (n: any) => ({
-  id: n.id, content: n.content, checkin_type: n.checkin_type, created_at: iso(n.created_at), source_type: n.source_type,
+  id: n.id, content: n.content, checkin_type: n.checkin_type, created_at: iso(n.created_at), updated_at: iso(n.updated_at ?? n.created_at), source_type: n.source_type,
   source: n.source_id ? { id: n.source_id, type: n.source_type } : null,
   author: n.ast_users ? { id: n.ast_users.id, name: name(n.ast_users) } : null,
 });
@@ -76,7 +76,8 @@ export function shift(s: any, extra: Record<string, unknown> = {}) {
   return {
     id: s.id, event_type: s.event_type, name: s.name, start_time: iso(s.start_time, tz), end_time: iso(s.end_time, tz), timezone: tz, status: s.status,
     clock_in_at: iso(s.clock_in_at, tz), clock_out_at: iso(s.clock_out_at, tz), user: userRef(s.ast_users),
-    support: s.ast_supports ? supportBrief(s.ast_supports) : null, group_support: s.group_support_id ? { id: s.group_support_id } : null, internal_event: null,
+    support: s.ast_supports ? { ...supportBrief(s.ast_supports), travels: (s.ast_supports.ast_travels || []).map((t: any) => travel({ ...t, participants: [participantRef(s.ast_supports.ast_participants)] })) } : null,
+    group_support: s.group_support_id ? { id: s.group_support_id } : null, internal_event: null,
     breaks: (s.ast_shift_breaks || []).map(breakOf), ...extra,
   };
 }
@@ -92,12 +93,15 @@ export function supportBrief(s: any) {
 export function support(s: any) {
   return {
     ...supportBrief(s),
-    shifts: (s.ast_shifts || []).map((x: any) => shift({ ...x, ast_supports: null })),
+    // the live API's nested shifts carry no support/group_support/internal_event keys
+    shifts: (s.ast_shifts || []).map((x: any) => { const { support: _s, group_support: _g, internal_event: _i, ...rest } = shift({ ...x, ast_supports: null }); return rest; }),
     travels: (s.ast_travels || []).map((t: any) => travel({ ...t, participants: [participantRef(s.ast_participants)] })),
   };
 }
+// Tasks are dated, not timed: the live API returns the task's date at midnight UTC.
+const taskDay = (v: string) => { const d = iso(v); return d ? `${d.slice(0, 10)}T00:00:00+00:00` : null; };
 export const task = (t: any, extra: Record<string, unknown> = {}) => ({
-  id: t.id, title: t.title, start_time: iso(t.start_time), duration: t.duration, billable: t.billable, completed: t.completed,
+  id: t.id, title: t.title, start_time: taskDay(t.start_time), duration: t.duration, billable: t.billable, completed: t.completed,
   participant: participantRef(t.ast_participants), user: t.ast_users ? { id: t.ast_users.id, name: name(t.ast_users), email: t.ast_users.email } : null, ...extra,
 });
 const chargeStatus = (s: string) => s === "uninvoiced" ? "pending" : s;

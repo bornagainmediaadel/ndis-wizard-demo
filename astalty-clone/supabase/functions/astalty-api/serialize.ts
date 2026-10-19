@@ -2,7 +2,7 @@
 // Astalty publishes for that endpoint (astalty_api_spec.spec), so the replica can only return
 // the properties the real API returns, in the same formats. Anything a handler adds that the
 // schema does not declare is dropped; anything the schema requires that is missing becomes null.
-import { ApiError, db, must } from "./lib.ts";
+import { ApiError, db, must, TZ } from "./lib.ts";
 
 type Schema = any;
 export type Op = {
@@ -70,15 +70,33 @@ export function utcIso(d: Date) {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}+00:00`;
 }
 const DATE_ONLY_KEYS = new Set(["dob"]);
+// Resources whose dates the live API returns as plain YYYY-MM-DD.
+const DATE_ONLY_IN = new Set(["PublicHolidayResource.date", "PlanServicePlanResource.start", "PlanServicePlanResource.end"]);
+// Keys that mark the end of a range: the live API stores them as 23:59:59 local time.
+const END_KEYS = new Set(["end", "end_date"]);
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TS_RE = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/;
+function offsetMinutes(ms: number, tz: string) {
+  const part = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "longOffset" }).formatToParts(new Date(ms)).find((p) => p.type === "timeZoneName")?.value ?? "GMT";
+  const m = /GMT([+-])(\d{1,2})(?::?(\d{2}))?/.exec(part);
+  return m ? (m[1] === "-" ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3] || 0)) : 0;
+}
+/** A calendar date as the live API stores it: midnight (or 23:59:59) in the account's timezone, expressed in UTC. */
+export function localDateUtc(date: string, endOfDay = false, tz = TZ) {
+  const base = Date.parse(`${date}T${endOfDay ? "23:59:59" : "00:00:00"}Z`);
+  let ms = base - offsetMinutes(base, tz) * 60000;
+  const again = offsetMinutes(ms, tz); if (again !== offsetMinutes(base, tz)) ms = base - again * 60000;
+  return utcIso(new Date(ms));
+}
 function formatTemporal(key: string, v: unknown, schemaName: string | null) {
   if (typeof v !== "string") return v;
-  if (DATE_ONLY_KEYS.has(key) || (schemaName === "PublicHolidayResource" && key === "date")) return v.slice(0, 10);
-  if (DATE_RE.test(v)) return `${v}T00:00:00+00:00`;
+  if (DATE_ONLY_KEYS.has(key) || DATE_ONLY_IN.has(`${schemaName}.${key}`)) return v.slice(0, 10);
+  if (DATE_RE.test(v)) return localDateUtc(v, END_KEYS.has(key));
   if (TS_RE.test(v)) { const d = new Date(v); if (!isNaN(d.getTime())) return utcIso(d); }
   return v;
 }
+// Properties the live API returns although the published document does not list them.
+const OVERLAY: Record<string, string[]> = { ParticipantNoteResource: ["updated_at"] };
 
 // ---------------------------------------------------------------- schema-driven serialisation
 function refName(s: Schema): string | null { const r = s?.$ref; return r ? String(r).split("/").pop()! : null; }
@@ -134,6 +152,7 @@ export function serialize(schema: Schema | null, value: unknown, key = "", paren
       const s = serialize(ps, v, k, r.name);
       out[k] = s === undefined ? null : s;
     }
+    for (const k of OVERLAY[r.name ?? ""] ?? []) if (k in src && !(k in out)) out[k] = formatTemporal(k, src[k] ?? null, r.name);
     return out;
   }
   if (r.isObject && typeof value === "object") return value; // free-form object (additionalProperties)
@@ -183,14 +202,14 @@ export function validateBody(op: Op, body: any) {
 }
 
 /** spatie/laravel-query-builder style guards for filter[] and sort, plus page[] bounds. */
-export function validateQuery(op: Op, query: URLSearchParams) {
+export function validateQuery(op: Op, query: URLSearchParams, sortsKnown = false) {
   const asked: string[] = [];
   for (const k of query.keys()) { const m = /^filter\[(.+?)\]$/.exec(k); if (m && !asked.includes(m[1])) asked.push(m[1]); }
   const bad = asked.filter((f) => !op.filters.includes(f));
   if (bad.length) {
     throw new ApiError(400, `Requested filter(s) \`${bad.join(", ")}\` are not allowed. Allowed filter(s) are \`${op.filters.join(", ")}\`.`);
   }
-  if (query.has("sort") && !op.sorts) throw new ApiError(400, `Requested sort(s) \`${query.get("sort")}\` is not allowed. Allowed sort(s) are \`\`.`);
+  if (!sortsKnown && query.has("sort") && !op.sorts) throw new ApiError(400, `Requested sort(s) \`${query.get("sort")}\` is not allowed. Allowed sort(s) are \`\`.`);
   const size = query.get("page[size]");
   if (size !== null && size !== "" && !(Number(size) >= 1 && Number(size) <= 100 && Number.isInteger(Number(size)))) {
     throw laravel422({ "page.size": ["The page.size field must be between 1 and 100."] });
@@ -215,7 +234,7 @@ export function validate(schema: Schema | null, value: unknown, path = "$", out:
     if (typeof value !== "object") { out.push(`${path}: expected object`); return out; }
     const obj = value as Record<string, unknown>;
     for (const k of r.required) if (!(k in obj)) out.push(`${path}.${k}: required property missing`);
-    for (const k of Object.keys(obj)) if (!(k in r.props)) out.push(`${path}.${k}: not in schema`);
+    for (const k of Object.keys(obj)) if (!(k in r.props) && !(OVERLAY[r.name ?? ""] ?? []).includes(k)) out.push(`${path}.${k}: not in schema`);
     for (const [k, ps] of Object.entries(r.props)) if (k in obj) validate(ps, obj[k], `${path}.${k}`, out, k);
     return out;
   }

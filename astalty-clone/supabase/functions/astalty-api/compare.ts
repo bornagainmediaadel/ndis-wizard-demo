@@ -70,6 +70,12 @@ function emptyArrays(s: Map<string, Set<string>>) {
   return out;
 }
 const under = (path: string, roots: string[]) => roots.some((r) => path.startsWith(r));
+/** True when the path's parent is only ever null on this side, so its children cannot be compared. */
+function parentNull(s: Map<string, Set<string>>, path: string) {
+  const parent = path.replace(/(\.[^.\[\]]+|\[\])$/, "");
+  const k = s.get(parent);
+  return !!k && k.size === 1 && k.has("null");
+}
 // The validator quotes offending values; keep only the kind of problem.
 const sanitize = (m: string) => m.replace(/expected integer, got .*$/, "expected integer").replace(/^(.*?): .* not in enum (.*)$/, "$1: value not in enum $2").replace(/timestamp \S+ is not UTC/, "timestamp is not UTC");
 
@@ -92,7 +98,7 @@ export async function compare(c: Ctx, routes: Route[]) {
       catch (e) { return { status: 0, body: null, error: String((e as Error).message) }; }
       if (res.status === 429 && attempt < 2) { realCalls.retried++; const wait = Math.min(Number(res.headers.get("retry-after") || 10), 30); await res.text(); await sleep(wait * 1000); continue; }
       const text = await res.text();
-      let body: any = null; try { body = text ? JSON.parse(text) : null; } catch { body = { _raw_type: res.headers.get("content-type") }; }
+      let body: any = null; try { body = text ? JSON.parse(text) : null; } catch { body = { _raw_type: res.headers.get("content-type"), _disposition: res.headers.get("content-disposition")?.split(";")[0] ?? null }; }
       return { status: res.status, body };
     }
     return { status: 429, body: null, error: "rate limited" };
@@ -107,7 +113,7 @@ export async function compare(c: Ctx, routes: Route[]) {
     const params: Record<string, string> = {}; h.keys.forEach((k, i) => (params[k] = decodeURIComponent(m[i + 1])));
     try {
       const out = await h.fn({ ...c, path: u.pathname, url: u, query: u.searchParams, params, body: {} });
-      if (out instanceof Response) return { status: out.status, body: { _raw_type: out.headers.get("content-type") } };
+      if (out instanceof Response) return { status: out.status, body: { _raw_type: out.headers.get("content-type"), _disposition: out.headers.get("content-disposition")?.split(";")[0] ?? null } };
       return { status: 200, body: serialize(hit.op.okSchema, out) };
     } catch (e) { return { status: (e as ApiError).status ?? 500, body: { message: (e as Error).message } }; }
   }
@@ -140,6 +146,12 @@ export async function compare(c: Ctx, routes: Route[]) {
     const row: any = { template: tpl, real_status: r.status, clone_status: k.status };
     if (r.error) row.real_error = r.error;
     if (r.status !== 200 || k.status !== 200) { if (r.status !== 200) row.real_message = r.body?.message ?? null; if (k.status !== 200) row.clone_message = k.body?.message ?? k.error ?? null; results.push(row); continue; }
+    if (r.body?._raw_type || k.body?._raw_type) {
+      row.real_content_type = r.body?._raw_type ?? "json"; row.clone_content_type = k.body?._raw_type ?? "json";
+      row.real_disposition = r.body?._disposition ?? null; row.clone_disposition = k.body?._disposition ?? null;
+      row.same = row.real_content_type === row.clone_content_type && row.real_disposition === row.clone_disposition;
+      results.push(row); continue;
+    }
     const hit = matchSpec("GET", new URL("https://x" + rp).pathname) as any;
     row.real_vs_spec = validate(hit.op.okSchema, r.body).map(sanitize).filter((m, i, a) => a.indexOf(m) === i).slice(0, 20);
     const rs = shape(r.body), cs = shape(k.body);
@@ -147,11 +159,12 @@ export async function compare(c: Ctx, routes: Route[]) {
     const missing_in_clone: string[] = [], extra_in_clone: string[] = [], kind_differs: string[] = [], unverified: string[] = [];
     for (const p of new Set([...rs.keys(), ...cs.keys()])) {
       const a = rs.get(p), b = cs.get(p);
-      if (a && !b) { (under(p, emptyC) ? unverified : missing_in_clone).push(p); continue; }
-      if (!a && b) { (under(p, emptyR) ? unverified : extra_in_clone).push(p); continue; }
+      if (a && !b) { (under(p, emptyC) || parentNull(cs, p) ? unverified : missing_in_clone).push(p); continue; }
+      if (!a && b) { (under(p, emptyR) || parentNull(rs, p) ? unverified : extra_in_clone).push(p); continue; }
       const an = [...a!].filter((x) => x !== "null").sort(), bn = [...b!].filter((x) => x !== "null").sort();
       if (!an.length || !bn.length) continue; // one side only ever null here: nothing to compare
-      if (an.join("|") !== bn.join("|")) kind_differs.push(`${p}: real ${an.join("|")} vs clone ${bn.join("|")}`);
+      const subset = an.every((x) => bn.includes(x)) || bn.every((x) => an.includes(x)); // a sample that shows fewer kinds is not a difference
+      if (!subset) kind_differs.push(`${p}: real ${an.join("|")} vs clone ${bn.join("|")}`);
     }
     const rSorts = r.body?.meta?.allowed_sorts, cSorts = k.body?.meta?.allowed_sorts;
     if (Array.isArray(rSorts) && Array.isArray(cSorts) && JSON.stringify([...rSorts].sort()) !== JSON.stringify([...cSorts].sort())) row.allowed_sorts = { real: rSorts, clone: cSorts };

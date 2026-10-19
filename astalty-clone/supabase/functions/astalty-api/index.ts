@@ -3,7 +3,7 @@
 // codes, query/body validation and the shape of every response come from Astalty's own OpenAPI
 // document (astalty_api_spec), so a client written against this replica sees exactly what the
 // real API returns. Synthetic data only.
-import { ApiError, authenticate, CORS, Ctx, FN_SLUG, html, json } from "./lib.ts";
+import { ApiError, authenticate, CORS, Ctx, FN_SLUG, html, json, allowedSorts } from "./lib.ts";
 import { ROUTES } from "./routes.ts";
 import { consolePage, docsPage } from "./ui.ts";
 import { loadSpec, matchSpec, serialize, validateBody, validateQuery } from "./serialize.ts";
@@ -72,10 +72,9 @@ Deno.serve(async (req) => {
     const key = await authenticate(req);
     if (key.permission === "read" && method !== "GET") throw new ApiError(403, "This action is unauthorized.");
     const body = await readBody(req, method);
-    if (method === "GET") validateQuery(hit.op, url.searchParams);
-    else validateBody(hit.op, body);
-
     const h = findHandler(method, path);
+    if (method === "GET") validateQuery(hit.op, url.searchParams, !!allowedSorts(h?.r.pattern));
+    else validateBody(hit.op, body);
     if (!h) throw new ApiError(501, "This endpoint exists in Astalty but is not implemented in the replica.");
     const ctx: Ctx = { req, method, path, url, query: url.searchParams, params: { ...hit.pp, ...h.params }, body, key, base };
     const out = await h.r.fn(ctx);

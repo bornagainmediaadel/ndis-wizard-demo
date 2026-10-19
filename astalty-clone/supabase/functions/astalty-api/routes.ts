@@ -1,5 +1,5 @@
 // Astalty clone · route handlers for /public/v1
-import { ApiError, attribute, csv, Ctx, db, emit, filter, invalid, iso, listOf, must, need, notFound, one, oneOf, paging, parseWhen, pick, q, run, sortOf, TZ, todayIn } from "./lib.ts";
+import { ApiError, allowedSorts, attribute, CORS, csv, Ctx, db, emit, filter, invalid, iso, listOf, must, need, notFound, one, oneOf, paging, parseWhen, pick, q, run, sortOf, TZ, todayIn } from "./lib.ts";
 import * as S from "./shapes.ts";
 import { matchSpec, serialize, specOps, validate } from "./serialize.ts";
 import { compare } from "./compare.ts";
@@ -9,7 +9,14 @@ export const ROUTES: { method: string; re: RegExp; keys: string[]; fn: Handler; 
 function route(method: string, pattern: string, fn: Handler) {
   const keys: string[] = [];
   const re = new RegExp("^" + pattern.replace(/:(\w+)/g, (_, k) => (keys.push(k), "([^/]+)")) + "/?$");
-  ROUTES.push({ method, re, keys, fn, pattern });
+  // Every handler sees its pattern (for the allowed sorts) and lists publish the live API's allowed_sorts.
+  const wrapped: Handler = async (c) => {
+    const out = await fn({ ...c, pattern });
+    const sorts = allowedSorts(pattern);
+    if (sorts && out && typeof out === "object" && !(out instanceof Response) && (out as any).meta) (out as any).meta.allowed_sorts = sorts;
+    return out;
+  };
+  ROUTES.push({ method, re, keys, fn: wrapped, pattern });
 }
 const V = "/public/v1";
 const UUID = /^[0-9a-f-]{36}$/i;
@@ -106,7 +113,8 @@ route("POST", `${V}/participants/:participant/unarchive`, async (c) => {
 });
 route("GET", `${V}/participants/:participant/addresses`, async (c) => {
   const id = idOf(c, "participant", "Participant"); await participantMustExist(id); const p = paging(c);
-  const { rows, total } = await run(db.from("ast_participant_addresses").select("*", { count: "exact" }).eq("participant_id", id).order("id"), p);
+  const [col, asc] = sortOf(c, {}, "id");
+  const { rows, total } = await run(db.from("ast_participant_addresses").select("*", { count: "exact" }).eq("participant_id", id).order(col, { ascending: asc }).order("id"), p);
   return listOf(rows.map(S.address), total, p);
 });
 route("GET", `${V}/participants/:participant/contacts`, async (c) => {
@@ -116,7 +124,8 @@ route("GET", `${V}/participants/:participant/contacts`, async (c) => {
 });
 async function documentsFor(c: Ctx, type: string, id: string) {
   const p = paging(c);
-  const { rows, total } = await run(db.from("ast_documents").select("*, ast_document_categories(id,name)", { count: "exact" }).eq("documentable_type", type).eq("documentable_id", id).order("created_at", { ascending: false }), p);
+  const [col, asc] = sortOf(c, {}, "-created_at");
+  const { rows, total } = await run(db.from("ast_documents").select("*, ast_document_categories(id,name)", { count: "exact" }).eq("documentable_type", type).eq("documentable_id", id).order(col, { ascending: asc }).order("id"), p);
   return listOf(rows.map(S.document), total, p);
 }
 async function addDocument(c: Ctx, type: string, id: string) {
@@ -146,7 +155,8 @@ route("POST", `${V}/participants/:participant/goals`, async (c) => {
 });
 route("GET", `${V}/participants/:participant/information-items`, async (c) => {
   const id = idOf(c, "participant", "Participant"); await participantMustExist(id); const p = paging(c);
-  const { rows, total } = await run(db.from("ast_participant_information_items").select("*, ast_participant_information_item_defs(*)", { count: "exact" }).eq("participant_id", id).order("created_at"), p);
+  const [col, asc] = sortOf(c, {}, "created_at");
+  const { rows, total } = await run(db.from("ast_participant_information_items").select("*, ast_participant_information_item_defs(*)", { count: "exact" }).eq("participant_id", id).order(col, { ascending: asc, nullsFirst: false }).order("id"), p);
   return listOf(rows.map(S.infoItem), total, p);
 });
 route("PUT", `${V}/participants/:participant/information-items`, async (c) => {
@@ -159,7 +169,8 @@ route("PUT", `${V}/participants/:participant/information-items`, async (c) => {
 });
 route("GET", `${V}/participants/:participant/ndis-plans`, async (c) => {
   const id = idOf(c, "participant", "Participant"); await participantMustExist(id); const p = paging(c);
-  const { rows, total } = await run(db.from("ast_ndis_plans").select("*", { count: "exact" }).eq("participant_id", id).order("start", { ascending: false }), p);
+  const [col, asc] = sortOf(c, {}, "-start");
+  const { rows, total } = await run(db.from("ast_ndis_plans").select("*", { count: "exact" }).eq("participant_id", id).order(col, { ascending: asc }).order("id"), p);
   return listOf(rows.map(S.ndisPlan), total, p);
 });
 route("GET", `${V}/participants/:participant/notes`, async (c) => {
@@ -187,7 +198,8 @@ route("GET", `${V}/participants/:participant/current-services`, async (c) => {
 });
 route("GET", `${V}/participants/:participant/budgets`, async (c) => {
   const id = idOf(c, "participant", "Participant"); await participantMustExist(id); const p = paging(c);
-  const { rows, total } = await run(db.from("ast_budgets").select("*", { count: "exact" }).eq("participant_id", id).order("start", { ascending: false }), p);
+  const [col, asc] = sortOf(c, {}, "-start");
+  const { rows, total } = await run(db.from("ast_budgets").select("*", { count: "exact" }).eq("participant_id", id).order(col, { ascending: asc }).order("id"), p);
   return listOf(rows.map(S.budget), total, p);
 });
 route("GET", `${V}/participants/:participant/risks`, async (c) => {
@@ -209,7 +221,8 @@ route("POST", `${V}/participants/:participant/risks`, async (c) => {
 });
 route("GET", `${V}/participants/:participant/public-holiday-groups`, async (c) => {
   const id = idOf(c, "participant", "Participant"); await participantMustExist(id); const p = paging(c);
-  const { rows, total } = await run(db.from("ast_public_holiday_groups").select("*", { count: "exact" }).order("name"), p);
+  const [col, asc] = sortOf(c, {}, "name");
+  const { rows, total } = await run(db.from("ast_public_holiday_groups").select("*", { count: "exact" }).order(col, { ascending: asc }).order("id"), p);
   return listOf(rows.map((g: any) => ({ id: g.id, name: g.name })), total, p);
 });
 route("GET", `${V}/risks/:risk`, async (c) => ({ data: S.risk(await one("ast_participant_risks", idOf(c, "risk", "Risk"), "*, ast_participant_risk_controls(*)", "Risk")) }));
@@ -331,12 +344,14 @@ route("GET", `${V}/services/:service`, async (c) => serviceFull(idOf(c, "service
 route("GET", `${V}/budgets/:budget`, async (c) => ({ data: S.budget(await one("ast_budgets", idOf(c, "budget", "Budget"), "*", "Budget")) }));
 route("GET", `${V}/budgets/:budget/items`, async (c) => {
   const id = idOf(c, "budget", "Budget"); await one("ast_budgets", id, "id", "Budget"); const p = paging(c);
-  const { rows, total } = await run(db.from("ast_budget_items").select("*, ast_charge_items(id,name,reference)", { count: "exact" }).eq("budget_id", id).order("name"), p);
+  const [col, asc] = sortOf(c, {}, "name");
+  const { rows, total } = await run(db.from("ast_budget_items").select("*, ast_charge_items(id,name,reference)", { count: "exact" }).eq("budget_id", id).order(col, { ascending: asc }).order("id"), p);
   return listOf(rows.map(S.budgetItem), total, p);
 });
 route("GET", `${V}/budgets/:budget/periods`, async (c) => {
   const id = idOf(c, "budget", "Budget"); await one("ast_budgets", id, "id", "Budget"); const p = paging(c);
-  const { rows, total } = await run(db.from("ast_budget_periods").select("*", { count: "exact" }).eq("budget_id", id).order("start"), p);
+  const [col, asc] = sortOf(c, {}, "start");
+  const { rows, total } = await run(db.from("ast_budget_periods").select("*", { count: "exact" }).eq("budget_id", id).order(col, { ascending: asc }).order("id"), p);
   return listOf(rows.map(S.budgetPeriod), total, p);
 });
 route("GET", `${V}/charge-items`, async (c) => {
@@ -351,7 +366,8 @@ route("GET", `${V}/charge-items`, async (c) => {
 });
 route("GET", `${V}/charge-item-sets`, async (c) => {
   const p = paging(c);
-  const { rows, total } = await run(db.from("ast_charge_item_sets").select("*", { count: "exact" }).order("name"), p);
+  const [col, asc] = sortOf(c, {}, "name");
+  const { rows, total } = await run(db.from("ast_charge_item_sets").select("*", { count: "exact" }).order(col, { ascending: asc }).order("id"), p);
   return listOf(rows.map(S.chargeItemSet), total, p);
 });
 
@@ -373,7 +389,7 @@ route("GET", `${V}/supports`, async (c) => {
   return listOf(rows.map(S.support), total, p, ["start_time", "end_time", "created_at"]);
 });
 route("GET", `${V}/supports/:support`, async (c) => ({ data: S.support(await one("ast_supports", idOf(c, "support", "Support"), SUP_SELECT, "Support")) }));
-const SHIFT_SELECT = "*, ast_users(id,first_name,last_name), ast_shift_breaks(*), ast_supports(*, ast_participants(id,first_name,last_name), ast_sites(id,name))";
+const SHIFT_SELECT = "*, ast_users(id,first_name,last_name), ast_shift_breaks(*), ast_supports(*, ast_participants(id,first_name,last_name), ast_sites(id,name), ast_travels(*, ast_users(id,first_name,last_name)))";
 route("GET", `${V}/shifts`, async (c) => {
   const p = paging(c);
   let qb = db.from("ast_shifts").select(SHIFT_SELECT, { count: "exact" });
@@ -389,7 +405,8 @@ route("GET", `${V}/group-supports`, async (c) => {
   const p = paging(c);
   let qb = db.from("ast_group_supports").select("*, ast_sites(id,name)", { count: "exact" });
   qb = dateWindow(c, qb, "start_time");
-  const { rows, total } = await run(qb.order("start_time"), p);
+  const [col, asc] = sortOf(c, {}, "start_time");
+  const { rows, total } = await run(qb.order(col, { ascending: asc }).order("id"), p);
   return listOf(rows.map((g: any) => ({ id: g.id, name: g.name, details: g.details, start_time: iso(g.start_time, g.timezone), end_time: iso(g.end_time, g.timezone), timezone: g.timezone, is_sleepover: g.is_sleepover, site: g.ast_sites ? { id: g.ast_sites.id, name: g.ast_sites.name } : null, participants: [], shifts: [], supports: [], travels: [] })), total, p, ["start_time"]);
 });
 route("GET", `${V}/group-supports/:groupSupport`, async (c) => { const g = await one("ast_group_supports", idOf(c, "groupSupport", "GroupSupport"), "*, ast_sites(id,name)", "GroupSupport") as any; return { data: { id: g.id, name: g.name, details: g.details, start_time: iso(g.start_time, g.timezone), end_time: iso(g.end_time, g.timezone), timezone: g.timezone, is_sleepover: g.is_sleepover, site: g.ast_sites ? { id: g.ast_sites.id, name: g.ast_sites.name } : null, participants: [], shifts: [], supports: [], travels: [] } }; });
@@ -697,7 +714,7 @@ route("GET", `${V}/participant-information-items/:participantInformationItem`, a
 route("PUT", `${V}/participant-information-items/:participantInformationItem`, async (c) => { const id = idOf(c, "participantInformationItem", "ParticipantInformationItem"); await one("ast_participant_information_item_defs", id, "id", "ParticipantInformationItem"); must(await db.from("ast_participant_information_item_defs").update(pick(c.body, ["name", "required", "documents_allowed", "visible_to_support_workers"])).eq("id", id)); await attribute(c, [id]); return { data: S.infoDef(await one("ast_participant_information_item_defs", id)) }; });
 
 // ---------------------------------------------------------------- tags (participant tags are real; the other tag families are empty in the replica)
-route("GET", `${V}/participant-tags`, async (c) => { const p = paging(c); const { rows, total } = await run(db.from("ast_participant_tags").select("*", { count: "exact" }).order("name"), p); return listOf(rows.map(S.tag), total, p); });
+route("GET", `${V}/participant-tags`, async (c) => { const p = paging(c); const [col, asc] = sortOf(c, {}, "name"); const { rows, total } = await run(db.from("ast_participant_tags").select("*", { count: "exact" }).order(col, { ascending: asc }).order("id"), p); return listOf(rows.map(S.tag), total, p); });
 route("POST", `${V}/participant-tags`, async (c) => { need(c.body, ["name"]); const t = must(await db.from("ast_participant_tags").insert(pick(c.body, ["name", "colour"])).select().single()) as any; await attribute(c, [t.id]); return { data: S.tag(t) }; });
 route("GET", `${V}/participant-tags/:participantTag`, async (c) => ({ data: S.tag(await one("ast_participant_tags", idOf(c, "participantTag", "ParticipantTag"), "*", "ParticipantTag")) }));
 route("PUT", `${V}/participant-tags/:participantTag`, async (c) => { const id = idOf(c, "participantTag", "ParticipantTag"); await one("ast_participant_tags", id, "id", "ParticipantTag"); must(await db.from("ast_participant_tags").update(pick(c.body, ["name", "colour"])).eq("id", id)); await attribute(c, [id]); return { data: S.tag(await one("ast_participant_tags", id)) }; });
@@ -765,8 +782,23 @@ route("GET", `${V}/sites/:site/participants`, async (c) => {
 
 // ---------------------------------------------------------------- documents, categories, forms, signatures, misc
 route("PUT", `${V}/documents/:document`, async (c) => { const id = idOf(c, "document", "Document"); await one("ast_documents", id, "id", "Document"); const row = pick(c.body, ["name"]); if (c.body.document_category !== undefined) row.category_id = c.body.document_category?.id ?? null; if (Object.keys(row).length) must(await db.from("ast_documents").update(row).eq("id", id)); await attribute(c, [id]); return { data: S.document(await one("ast_documents", id, "*, ast_document_categories(id,name)")) }; });
-route("GET", `${V}/documents/:document/download`, async (c) => { const d = await one("ast_documents", idOf(c, "document", "Document"), "*", "Document") as any; return { data: { id: d.id, name: d.name, url: null, message: "The replica stores document metadata only; there is no file to download." } }; });
-route("GET", `${V}/document-categories`, async (c) => { const p = paging(c); const { rows, total } = await run(db.from("ast_document_categories").select("*", { count: "exact" }).order("name"), p); return listOf(rows.map(S.documentCategory), total, p); });
+route("GET", `${V}/documents/:document/download`, async (c) => {
+  // The live API streams the file with a Content-Disposition attachment; the replica streams a one-page placeholder PDF.
+  const d = await one("ast_documents", idOf(c, "document", "Document"), "*", "Document") as any;
+  const file = `${String(d.name).replace(/\.[a-z0-9]+$/i, "")}.${d.file_extension || "pdf"}`;
+  return new Response(placeholderPdf(d.name), { status: 200, headers: { ...CORS, "content-type": "application/pdf", "content-disposition": `attachment; filename="${file.replace(/"/g, "")}"`, "content-filename": encodeURIComponent(file), "cache-control": "no-cache, private" } });
+});
+function placeholderPdf(title: string) {
+  const text = `(${String(title).replace(/[()\\]/g, "")} - NDIS Wizard test replica placeholder) Tj`;
+  const stream = `BT /F1 14 Tf 72 720 Td ${text} ET`;
+  const objs = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>", `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"];
+  let out = "%PDF-1.4\n"; const offs: number[] = [];
+  objs.forEach((o, i) => { offs.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+  const xref = out.length;
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map((o) => `${String(o).padStart(10, "0")} 00000 n \n`).join("") + `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return new TextEncoder().encode(out);
+}
+route("GET", `${V}/document-categories`, async (c) => { const p = paging(c); const [col, asc] = sortOf(c, {}, "name"); const { rows, total } = await run(db.from("ast_document_categories").select("*", { count: "exact" }).order(col, { ascending: asc }).order("id"), p); return listOf(rows.map(S.documentCategory), total, p); });
 route("POST", `${V}/document-categories`, async (c) => { need(c.body, ["name"]); const r = must(await db.from("ast_document_categories").insert({ name: c.body.name }).select().single()) as any; await attribute(c, [r.id]); return { data: S.documentCategory(r) }; });
 route("GET", `${V}/document-categories/:documentCategory`, async (c) => ({ data: S.documentCategory(await one("ast_document_categories", idOf(c, "documentCategory", "DocumentCategory"), "*", "DocumentCategory")) }));
 route("PUT", `${V}/document-categories/:documentCategory`, async (c) => { const id = idOf(c, "documentCategory", "DocumentCategory"); await one("ast_document_categories", id, "id", "DocumentCategory"); must(await db.from("ast_document_categories").update(pick(c.body, ["name"])).eq("id", id)); await attribute(c, [id]); return { data: S.documentCategory(await one("ast_document_categories", id)) }; });
@@ -776,9 +808,9 @@ route("GET", `${V}/form-submissions/:formSubmission`, async (c) => ({ data: S.fo
 const SIG_SELECT = "*, ast_users(id,first_name,last_name,email), ast_participants(id,first_name,last_name)";
 route("GET", `${V}/signature-requests`, async (c) => { const p = paging(c); const { rows, total } = await run(db.from("ast_signature_requests").select(SIG_SELECT, { count: "exact" }).order("created_at", { ascending: false }), p); return listOf(rows.map(S.signatureRequest), total, p); });
 route("GET", `${V}/signature-requests/:signatureRequest`, async (c) => ({ data: S.signatureRequest(await one("ast_signature_requests", idOf(c, "signatureRequest", "SignatureRequest"), SIG_SELECT, "SignatureRequest")) }));
-route("GET", `${V}/public-holidays`, async (c) => { const p = paging(c); const { rows, total } = await run(db.from("ast_public_holidays").select("*", { count: "exact" }).order("date"), p); return listOf(rows.map(S.publicHoliday), total, p); });
-route("GET", `${V}/public-holiday-groups`, async (c) => { const p = paging(c); const { rows, total } = await run(db.from("ast_public_holiday_groups").select("*", { count: "exact" }).order("name"), p); return listOf(rows.map((g: any) => ({ id: g.id, name: g.name })), total, p); });
-route("GET", `${V}/exports`, async (c) => { const p = paging(c); const { rows, total } = await run(db.from("ast_exports").select("*", { count: "exact" }).order("created_at", { ascending: false }), p); return listOf(rows.map(S.exportRow), total, p); });
+route("GET", `${V}/public-holidays`, async (c) => { const p = paging(c); const [col, asc] = sortOf(c, {}, "date"); const { rows, total } = await run(db.from("ast_public_holidays").select("*", { count: "exact" }).order(col, { ascending: asc }).order("id"), p); return listOf(rows.map(S.publicHoliday), total, p); });
+route("GET", `${V}/public-holiday-groups`, async (c) => { const p = paging(c); const [col, asc] = sortOf(c, {}, "name"); const { rows, total } = await run(db.from("ast_public_holiday_groups").select("*", { count: "exact" }).order(col, { ascending: asc }).order("id"), p); return listOf(rows.map((g: any) => ({ id: g.id, name: g.name })), total, p); });
+route("GET", `${V}/exports`, async (c) => { const p = paging(c); const [col, asc] = sortOf(c, {}, "-created_at"); const { rows, total } = await run(db.from("ast_exports").select("*", { count: "exact" }).order(col, { ascending: asc }).order("id"), p); return listOf(rows.map(S.exportRow), total, p); });
 route("POST", `${V}/temporary-uploads`, async (c) => ({ data: { id: crypto.randomUUID(), name: c.body?.name ?? "upload", expires_at: iso(new Date(Date.now() + 3600e3)), message: "The replica accepts upload metadata only." } }));
 
 // ---------------------------------------------------------------- webhooks
