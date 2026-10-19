@@ -2246,7 +2246,7 @@ async function raw(method,path,body){
   while(Date.now()-t0<150000){await sleep(w);w=Math.min(1200,w+150);const r=(await sql(`select public.wizard_result(${id}) as r`))[0].r;
    if(r&&r.done){if(r.error||r.timed_out)throw new Error(r.timed_out?'The agent took too long. Try a smaller run.':r.error);return{status:Number(r.status),body:r.body}}}
   throw new Error('No reply from the agents API after 150 seconds.')}
- const r=await fetch((path.startsWith('/xero/')?LCFG.fn.replace(/ndis-wizard$/,'wizard-xero'):path.startsWith('/ops/')?LCFG.fn.replace(/ndis-wizard$/,'wizard-ops'):path.startsWith('/registers/')?LCFG.fn.replace(/ndis-wizard$/,'wizard-registers'):LCFG.fn)+path,{method,headers:{'content-type':'application/json','x-wizard-session':L.session||''},body:method==='GET'?undefined:JSON.stringify(body||{})});
+ const r=await fetch((path.startsWith('/xero/')?LCFG.fn.replace(/ndis-wizard$/,'wizard-xero'):path.startsWith('/ops/')?LCFG.fn.replace(/ndis-wizard$/,'wizard-ops'):path.startsWith('/registers/')?LCFG.fn.replace(/ndis-wizard$/,'wizard-registers'):LCFG.fn)+path+(/[?&]source=astalty/i.test(location.search)?(path.includes('?')?'&':'?')+'source=astalty':''),{method,headers:{'content-type':'application/json','x-wizard-session':L.session||''},body:method==='GET'?undefined:JSON.stringify(body||{})});
  let j=null;try{j=await r.json()}catch(e){}return{status:r.status,body:j}}
 async function api(path,body,onp){const method=body===undefined?'GET':'POST';let b=body;
  for(let k=0;k<5;k++){const r=await raw(method,k&&method==='GET'?path+(path.includes('?')?'&':'?')+'resume=1':path,b);
