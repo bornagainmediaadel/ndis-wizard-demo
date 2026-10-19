@@ -24,23 +24,23 @@ on conflict (prefix) do nothing;
 
 -- charge items (support items; prices in cents, approximate 2025-26 SA rates)
 insert into ast_charge_items(id, number, reference, name, price, unit, gst_code, default_claim_type, support_category) values
- (ast_id('ci:01_011'), '01_011_0107_1_1', '01_011_0107_1_1', 'Assistance With Self-Care Activities - Standard - Weekday Daytime', 7023, 'H', 'P2', null, '01'),
- (ast_id('ci:01_015'), '01_015_0107_1_1', '01_015_0107_1_1', 'Assistance With Self-Care Activities - Standard - Weekday Evening', 7738, 'H', 'P2', null, '01'),
- (ast_id('ci:01_013'), '01_013_0107_1_1', '01_013_0107_1_1', 'Assistance With Self-Care Activities - Standard - Saturday', 9883, 'H', 'P2', null, '01'),
- (ast_id('ci:01_014'), '01_014_0107_1_1', '01_014_0107_1_1', 'Assistance With Self-Care Activities - Standard - Sunday', 12743, 'H', 'P2', null, '01'),
- (ast_id('ci:01_012'), '01_012_0107_1_1', '01_012_0107_1_1', 'Assistance With Self-Care Activities - Standard - Public Holiday', 15603, 'H', 'P2', null, '01'),
- (ast_id('ci:01_002'), '01_002_0107_1_1', '01_002_0107_1_1', 'Assistance With Self-Care Activities - Night-Time Sleepover', 28656, 'E', 'P2', null, '01'),
- (ast_id('ci:01_799'), '01_799_0107_1_1', '01_799_0107_1_1', 'Provider Travel - Non-Labour Costs (Daily Activities)', 100, 'KM', 'P2', 'TRAN', '01'),
- (ast_id('ci:04_104'), '04_104_0125_6_1', '04_104_0125_6_1', 'Access Community Social And Rec Activities - Standard - Weekday Daytime', 7023, 'H', 'P2', null, '04'),
- (ast_id('ci:04_103'), '04_103_0125_6_1', '04_103_0125_6_1', 'Access Community Social And Rec Activities - Standard - Weekday Evening', 7738, 'H', 'P2', null, '04'),
- (ast_id('ci:04_105'), '04_105_0125_6_1', '04_105_0125_6_1', 'Access Community Social And Rec Activities - Standard - Saturday', 9883, 'H', 'P2', null, '04'),
- (ast_id('ci:04_106'), '04_106_0125_6_1', '04_106_0125_6_1', 'Access Community Social And Rec Activities - Standard - Sunday', 12743, 'H', 'P2', null, '04'),
- (ast_id('ci:04_102'), '04_102_0125_6_1', '04_102_0125_6_1', 'Access Community Social And Rec Activities - Standard - Public Holiday', 15603, 'H', 'P2', null, '04'),
- (ast_id('ci:04_799'), '04_799_0125_6_1', '04_799_0125_6_1', 'Provider Travel - Non-Labour Costs (Community Participation)', 100, 'KM', 'P2', 'TRAN', '04'),
- (ast_id('ci:07_002'), '07_002_0106_8_3', '07_002_0106_8_3', 'Level 2: Coordination Of Supports', 10014, 'H', 'P2', null, '07'),
- (ast_id('ci:07_001'), '07_001_0106_8_3', '07_001_0106_8_3', 'Level 1: Support Connection', 6756, 'H', 'P2', null, '07'),
- (ast_id('ci:15_056'), '15_056_0128_1_3', '15_056_0128_1_3', 'Assessment Recommendation Therapy Or Training - Occupational Therapist', 19399, 'H', 'P2', null, '15'),
- (ast_id('ci:15_037'), '15_037_0117_1_3', '15_037_0117_1_3', 'Individual Skill Development And Training - Standard - Weekday Daytime', 7023, 'H', 'P2', null, '15')
+ (ast_id('ci:01_011'), '01_011_0107_1_1', 'SC_WD_DAY', 'Assistance With Self-Care Activities - Standard - Weekday Daytime', 7023, 'H', 'P2', null, '01'),
+ (ast_id('ci:01_015'), '01_015_0107_1_1', 'SC_WD_EVE', 'Assistance With Self-Care Activities - Standard - Weekday Evening', 7738, 'H', 'P2', null, '01'),
+ (ast_id('ci:01_013'), '01_013_0107_1_1', 'SC_SAT', 'Assistance With Self-Care Activities - Standard - Saturday', 9883, 'H', 'P2', null, '01'),
+ (ast_id('ci:01_014'), '01_014_0107_1_1', 'SC_SUN', 'Assistance With Self-Care Activities - Standard - Sunday', 12743, 'H', 'P2', null, '01'),
+ (ast_id('ci:01_012'), '01_012_0107_1_1', 'SC_PH', 'Assistance With Self-Care Activities - Standard - Public Holiday', 15603, 'H', 'P2', null, '01'),
+ (ast_id('ci:01_002'), '01_002_0107_1_1', 'SC_SLEEPOVER', 'Assistance With Self-Care Activities - Night-Time Sleepover', 28656, 'E', 'P2', null, '01'),
+ (ast_id('ci:01_799'), '01_799_0107_1_1', 'TRAVEL_KM_CORE', 'Provider Travel - Non-Labour Costs (Daily Activities)', 100, 'KM', 'P2', 'TRAN', '01'),
+ (ast_id('ci:04_104'), '04_104_0125_6_1', 'CA_WD_DAY', 'Access Community Social And Rec Activities - Standard - Weekday Daytime', 7023, 'H', 'P2', null, '04'),
+ (ast_id('ci:04_103'), '04_103_0125_6_1', 'CA_WD_EVE', 'Access Community Social And Rec Activities - Standard - Weekday Evening', 7738, 'H', 'P2', null, '04'),
+ (ast_id('ci:04_105'), '04_105_0125_6_1', 'CA_SAT', 'Access Community Social And Rec Activities - Standard - Saturday', 9883, 'H', 'P2', null, '04'),
+ (ast_id('ci:04_106'), '04_106_0125_6_1', 'CA_SUN', 'Access Community Social And Rec Activities - Standard - Sunday', 12743, 'H', 'P2', null, '04'),
+ (ast_id('ci:04_102'), '04_102_0125_6_1', 'CA_PH', 'Access Community Social And Rec Activities - Standard - Public Holiday', 15603, 'H', 'P2', null, '04'),
+ (ast_id('ci:04_799'), '04_799_0125_6_1', 'TRAVEL_KM_CA', 'Provider Travel - Non-Labour Costs (Community Participation)', 100, 'KM', 'P2', 'TRAN', '04'),
+ (ast_id('ci:07_002'), '07_002_0106_8_3', 'SUPPORT_COORD_L2', 'Level 2: Coordination Of Supports', 10014, 'H', 'P2', null, '07'),
+ (ast_id('ci:07_001'), '07_001_0106_8_3', 'SUPPORT_CONN_L1', 'Level 1: Support Connection', 6756, 'H', 'P2', null, '07'),
+ (ast_id('ci:15_056'), '15_056_0128_1_3', 'OT_ASSESSMENT', 'Assessment Recommendation Therapy Or Training - Occupational Therapist', 19399, 'H', 'P2', null, '15'),
+ (ast_id('ci:15_037'), '15_037_0117_1_3', 'SKILL_DEV_WD', 'Individual Skill Development And Training - Standard - Weekday Daytime', 7023, 'H', 'P2', null, '15')
 on conflict (id) do nothing;
 
 insert into ast_charge_item_sets(id, name, reference, charge_rate_pattern, gst_code) values
@@ -323,9 +323,9 @@ on conflict (id) do nothing;
 insert into ast_participant_records(id, participant_id, type_id, name, reference, issue_date, expiry_date) values
  (ast_id('pr:13:consent'), ast_id('p:13'), ast_id('prt:consent'), 'Consent to share information', null, '2024-09-01', '2026-09-01') on conflict (id) do nothing;
 insert into ast_signature_requests(id, title, owner_type, owner_id, participant_id, platform, status, is_test, expires_at, created_at) values
- (ast_id('sig:13'), 'Service Agreement 2025-26 - Ruby Delacroix', 'user', ast_id('user:2'), ast_id('p:13'), 'astalty', 'expired', false, '2025-12-03 00:00+00', '2025-11-03 03:00+00'),
- (ast_id('sig:14'), 'Service Agreement 2026-27 - Harper Osei', 'user', ast_id('user:2'), ast_id('p:14'), 'astalty', 'sent', false, '2026-10-28 00:00+00', '2026-09-28 03:00+00'),
- (ast_id('sig:10'), 'Service Agreement 2026-27 - Lucas Abara', 'user', ast_id('user:2'), ast_id('p:10'), 'astalty', 'signed', false, null, '2026-08-25 03:00+00')
+ (ast_id('sig:13'), 'Service Agreement 2025-26 - Ruby Delacroix', 'user', ast_id('user:2'), ast_id('p:13'), 'docusign', 'expired', false, '2025-12-03 00:00+00', '2025-11-03 03:00+00'),
+ (ast_id('sig:14'), 'Service Agreement 2026-27 - Harper Osei', 'user', ast_id('user:2'), ast_id('p:14'), 'docusign', 'awaiting_signatures', false, '2026-10-28 00:00+00', '2026-09-28 03:00+00'),
+ (ast_id('sig:10'), 'Service Agreement 2026-27 - Lucas Abara', 'user', ast_id('user:2'), ast_id('p:10'), 'docusign', 'completed', false, null, '2026-08-25 03:00+00')
 on conflict (id) do nothing;
 
 insert into ast_documents(id, documentable_type, documentable_id, category_id, name, file_extension, size_bytes)

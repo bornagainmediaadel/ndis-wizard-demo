@@ -1,6 +1,7 @@
 // Astalty clone · route handlers for /public/v1
 import { ApiError, attribute, csv, Ctx, db, emit, filter, invalid, iso, listOf, must, need, notFound, one, oneOf, paging, parseWhen, pick, q, run, sortOf, TZ, todayIn } from "./lib.ts";
 import * as S from "./shapes.ts";
+import { matchSpec, serialize, validate } from "./serialize.ts";
 
 type Handler = (c: Ctx) => Promise<unknown>;
 export const ROUTES: { method: string; re: RegExp; keys: string[]; fn: Handler; pattern: string }[] = [];
@@ -11,7 +12,7 @@ function route(method: string, pattern: string, fn: Handler) {
 }
 const V = "/public/v1";
 const UUID = /^[0-9a-f-]{36}$/i;
-const idOf = (c: Ctx, k: string, what: string) => { const v = c.params[k]; if (!UUID.test(v)) throw notFound(what); return v; };
+const idOf = (c: Ctx, k: string, what: string) => { const v = c.params[k]; if (!UUID.test(v)) throw notFound(what, v); return v; };
 
 // participant base select used by list/show
 const P_SELECT = "*, ast_plan_managers(id,name,invoice_email), ast_users!ast_participants_primary_coordinator_id_fkey(id,first_name,last_name,email)";
@@ -307,7 +308,7 @@ route("GET", `${V}/services`, async (c) => {
   const st = csv(filter(c, "status"));
   if (st) {
     const ors: string[] = [];
-    if (st.includes("active")) ors.push(`and(start.lte.${today},end.gte.${today})`);
+    if (st.includes("current") || st.includes("active")) ors.push(`and(start.lte.${today},end.gte.${today})`);
     if (st.includes("upcoming")) ors.push(`start.gt.${today}`);
     if (st.includes("expired")) ors.push(`end.lt.${today}`);
     if (ors.length) qb = qb.or(ors.join(","));
@@ -479,9 +480,12 @@ route("GET", `${V}/invoices`, async (c) => {
   const batch = filter(c, "invoice_batch"); if (batch) qb = qb.eq("batch_id", batch);
   const after = filter(c, "date_after"); if (after) qb = qb.gte("date", after);
   const before = filter(c, "date_before"); if (before) qb = qb.lte("date", before);
-  const [col, asc] = sortOf(c, { date: "date", due_date: "due_date", number: "number", total: "total", created_at: "created_at" }, "-date");
-  const { rows, total } = await run(qb.order(col, { ascending: asc }).order("number"), p);
-  return listOf(rows.map((i: any) => S.invoice(i)), total, p, ["date", "due_date", "number", "total", "created_at"]);
+  const { rows, total } = await run(qb.order("date", { ascending: false }).order("number"), p);
+  const ids = rows.map((i: any) => i.id);
+  const charges = ids.length ? must(await db.from("ast_charges").select("*, ast_charge_items(id,name,reference)").in("invoice_id", ids).order("date").order("created_at")) as any[] : [];
+  const by = new Map<string, any[]>();
+  for (const ch of charges) { if (!by.has(ch.invoice_id)) by.set(ch.invoice_id, []); by.get(ch.invoice_id)!.push(S.invoiceCharge(ch)); }
+  return listOf(rows.map((i: any) => S.invoice(i, { charges: by.get(i.id) ?? [] })), total, p);
 });
 route("GET", `${V}/invoices/:invoice`, async (c) => invoiceFull(idOf(c, "invoice", "Invoice")));
 route("POST", `${V}/invoices/:invoice/payment-allocations`, async (c) => {
@@ -755,8 +759,9 @@ route("PUT", `${V}/document-categories/:documentCategory`, async (c) => { const 
 route("GET", `${V}/forms`, async (c) => { const p = paging(c); const { rows, total } = await run(db.from("ast_forms").select("*", { count: "exact" }).order("name"), p); return listOf(rows.map(S.form), total, p); });
 route("GET", `${V}/form-submissions`, async (c) => { const p = paging(c); const { rows, total } = await run(db.from("ast_form_submissions").select("*, ast_forms(*)", { count: "exact" }).order("submitted_at", { ascending: false }), p); return listOf(rows.map(S.formSubmission), total, p); });
 route("GET", `${V}/form-submissions/:formSubmission`, async (c) => ({ data: S.formSubmission(await one("ast_form_submissions", idOf(c, "formSubmission", "FormSubmission"), "*, ast_forms(*)", "FormSubmission")) }));
-route("GET", `${V}/signature-requests`, async (c) => { const p = paging(c); let qb = db.from("ast_signature_requests").select("*", { count: "exact" }); const st = csv(filter(c, "status")); if (st) qb = qb.in("status", st); const { rows, total } = await run(qb.order("created_at", { ascending: false }), p); return listOf(rows.map(S.signatureRequest), total, p); });
-route("GET", `${V}/signature-requests/:signatureRequest`, async (c) => ({ data: S.signatureRequest(await one("ast_signature_requests", idOf(c, "signatureRequest", "SignatureRequest"), "*", "SignatureRequest")) }));
+const SIG_SELECT = "*, ast_users!ast_signature_requests_owner_id_fkey(id,first_name,last_name,email), ast_participants(id,first_name,last_name)";
+route("GET", `${V}/signature-requests`, async (c) => { const p = paging(c); const { rows, total } = await run(db.from("ast_signature_requests").select(SIG_SELECT, { count: "exact" }).order("created_at", { ascending: false }), p); return listOf(rows.map(S.signatureRequest), total, p); });
+route("GET", `${V}/signature-requests/:signatureRequest`, async (c) => ({ data: S.signatureRequest(await one("ast_signature_requests", idOf(c, "signatureRequest", "SignatureRequest"), SIG_SELECT, "SignatureRequest")) }));
 route("GET", `${V}/public-holidays`, async (c) => { const p = paging(c); const { rows, total } = await run(db.from("ast_public_holidays").select("*", { count: "exact" }).order("date"), p); return listOf(rows.map(S.publicHoliday), total, p); });
 route("GET", `${V}/public-holiday-groups`, async (c) => { const p = paging(c); const { rows, total } = await run(db.from("ast_public_holiday_groups").select("*", { count: "exact" }).order("name"), p); return listOf(rows.map((g: any) => ({ id: g.id, name: g.name })), total, p); });
 route("GET", `${V}/exports`, async (c) => { const p = paging(c); const { rows, total } = await run(db.from("ast_exports").select("*", { count: "exact" }).order("created_at", { ascending: false }), p); return listOf(rows.map(S.exportRow), total, p); });
@@ -799,8 +804,8 @@ export const PLANTED = [
   { code: "P18", area: "rostering", summary: "Priya Nair is rostered to two overlapping shifts on Wed 21 Oct (Alex 07:30–10:00 and Isla 09:00–11:00)." },
   { code: "P19", area: "complaints", summary: "Complaint FB-2026-007 from Alex Marino's mother about late workers has been open since 29 Sep with no follow-up." },
 ];
-route("GET", `/demo/planted`, async () => ({ data: PLANTED }));
-route("GET", `/changes`, async (c) => {
+route("GET", `/_replica/planted`, async () => ({ data: PLANTED }));
+route("GET", `/_replica/changes`, async (c) => {
   const p = paging(c, 50);
   let qb = db.from("ast_change_log").select("*", { count: "exact" });
   const since = q(c, "since"); if (since) qb = qb.gte("at", parseWhen(since, "since"));
@@ -817,3 +822,44 @@ function summarise(r: any) {
   return `${t.replace(/s$/, "")} updated${who}: ${changed.map((k) => `${k} ${JSON.stringify(r.before?.[k])} → ${JSON.stringify(r.after[k])}`).join("; ")}`;
 }
 export { TZ };
+
+// ---------------------------------------------------------------- replica: conformance check against the published schema
+route("GET", `/_replica/conformance`, async (c) => {
+  const first = async (t: string, where?: (q: any) => any) => { let qb = db.from(t).select("id").limit(1); if (where) qb = where(qb); const r = must(await qb) as any[]; return r[0]?.id as string | undefined; };
+  const [pid, sid, shid, iid, tid, gid, bid, plan, svc, uid, rid, inc, fb, ref, sig, batch, site, contact, org, pm, doc, wh] = await Promise.all([
+    first("ast_participants"), first("ast_supports", (q) => q.eq("status", "completed")), first("ast_shifts"), first("ast_invoices"), first("ast_tasks"), first("ast_goals"), first("ast_budgets"),
+    first("ast_ndis_plans"), first("ast_services"), first("ast_users"), first("ast_participant_risks"), first("ast_incidents"), first("ast_feedback"), first("ast_referrals"), first("ast_signature_requests"),
+    first("ast_invoice_batches"), first("ast_sites"), first("ast_contacts"), first("ast_organisations"), first("ast_plan_managers"), first("ast_documents"), first("ast_webhooks"),
+  ]);
+  const paths = [
+    `${V}/app/status`, `${V}/participants?page[size]=5`, `${V}/participants/${pid}`, `${V}/participants/${pid}/addresses`, `${V}/participants/${pid}/contacts`, `${V}/participants/${pid}/documents`,
+    `${V}/participants/${pid}/goals`, `${V}/participants/${pid}/information-items`, `${V}/participants/${pid}/ndis-plans`, `${V}/participants/${pid}/notes?page[size]=5`, `${V}/participants/${pid}/current-services`,
+    `${V}/participants/${pid}/budgets`, `${V}/participants/${pid}/risks`, `${V}/participants/${pid}/public-holiday-groups`, `${V}/risks/${rid}`, `${V}/goals/${gid}`, `${V}/goals/${gid}/supports?page[size]=3`, `${V}/goals/${gid}/tasks?page[size]=3`,
+    `${V}/ndis-plans/${plan}`, `${V}/ndis-plans/${plan}/budgets`, `${V}/ndis-plans/${plan}/implementations`, `${V}/services?page[size]=5`, `${V}/services/${svc}`, `${V}/budgets/${bid}`, `${V}/budgets/${bid}/items`, `${V}/budgets/${bid}/periods`,
+    `${V}/charge-items`, `${V}/charge-item-sets`, `${V}/supports?page[size]=5`, `${V}/supports/${sid}`, `${V}/shifts?page[size]=5`, `${V}/shifts/${shid}`, `${V}/group-supports`,
+    `${V}/tasks?page[size]=5`, `${V}/tasks/${tid}`, `${V}/tasks/${tid}/charges`, `${V}/tasks/${tid}/documents`, `${V}/invoices?page[size]=5`, `${V}/invoices/${iid}`, `${V}/invoice-batches`, `${V}/invoice-batches/${batch}/invoices?page[size]=3`,
+    `${V}/incidents`, `${V}/incidents/${inc}`, `${V}/feedback`, `${V}/feedback/${fb}`, `${V}/referrals`, `${V}/referrals/${ref}`, `${V}/users`, `${V}/users/${uid}`, `${V}/users/${uid}/documents`, `${V}/users/${uid}/notes`, `${V}/users/${uid}/tasks?page[size]=3`,
+    `${V}/user-record-types`, `${V}/user-records?page[size]=10`, `${V}/participant-record-types`, `${V}/participant-records?page[size]=10`, `${V}/participant-information-items`, `${V}/participant-tags`,
+    `${V}/contacts`, `${V}/contacts/${contact}`, `${V}/contacts/${contact}/participants`, `${V}/organisations`, `${V}/organisations/${org}`, `${V}/organisations/${org}/contacts`, `${V}/plan-managers`, `${V}/plan-managers/${pm}`,
+    `${V}/sites`, `${V}/sites/${site}`, `${V}/sites/${site}/participants`, `${V}/documents/${doc}/download`, `${V}/document-categories`, `${V}/forms`, `${V}/form-submissions`, `${V}/signature-requests`, `${V}/signature-requests/${sig}`,
+    `${V}/public-holidays`, `${V}/public-holiday-groups`, `${V}/exports`, `${V}/webhook-event-types`, `${V}/webhooks`, `${V}/webhooks/${wh}`, `${V}/note-templates`,
+  ];
+  const results: any[] = [];
+  for (const full of paths) {
+    const u = new URL("https://x" + full);
+    const hit = matchSpec("GET", u.pathname);
+    if (!hit || "allowed" in hit) { results.push({ path: full, error: "no spec operation" }); continue; }
+    const h = ROUTES.find((r) => r.method === "GET" && u.pathname.match(r.re));
+    if (!h) { results.push({ path: full, error: "not implemented" }); continue; }
+    const m = u.pathname.match(h.re)!;
+    const params: Record<string, string> = {}; h.keys.forEach((k, i) => (params[k] = decodeURIComponent(m[i + 1])));
+    try {
+      const out = await h.fn({ ...c, path: u.pathname, url: u, query: u.searchParams, params, body: {} });
+      const ser = serialize(hit.op.okSchema, out);
+      const problems = validate(hit.op.okSchema, ser);
+      results.push({ path: full, ok: problems.length === 0, problems: problems.slice(0, 12) });
+    } catch (e) { results.push({ path: full, error: String((e as Error).message) }); }
+  }
+  return { checked: results.length, passed: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok), spec_operations: specOpsCount() };
+});
+function specOpsCount() { return (globalThis as any).__ast_ops_count ?? null; }

@@ -102,7 +102,7 @@ begin
       if pat.kind = 'community' then
         km := 10 + (h % 16);
         insert into ast_travels(id, support_id, user_id, travel_anchor, distance, duration, approved_distance, approved_duration, odometer_start, odometer_end, actual_start_time, actual_end_time, actual_distance, actual_duration, was_not_travelled)
-        values (ast_id('trv:'||sid::text), sid, ast_id('user:'||pat.worker), 'during', km, km * 2, km, km * 2,
+        values (ast_id('trv:'||sid::text), sid, ast_id('user:'||pat.worker), 'start', km, km * 2, km, km * 2,
                 case when done and not cancelled then 40000 + (h % 9000) end, case when done and not cancelled then 40000 + (h % 9000) + km end,
                 case when done and not cancelled then ts0 + interval '30 minutes' end, case when done and not cancelled then ts0 + interval '30 minutes' + make_interval(mins => km*2) end,
                 case when done and not cancelled then km end, case when done and not cancelled then km * 2 end,

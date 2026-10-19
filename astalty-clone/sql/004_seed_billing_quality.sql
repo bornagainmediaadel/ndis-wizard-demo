@@ -86,13 +86,13 @@ update ast_invoices set management_type = 'plan', plan_manager_id = null where i
 
 -- ---------------------------------------------------------------- plan implementations, check-ins
 insert into ast_plan_implementations(id, plan_id, plan_budget_id, status, amount, frequency, description, implemented_at, is_internal, provider_type, provider_id, provider_name)
-select ast_id('impl:'||s.id::text), s.plan_id, pb.id, 'implemented', s.amount, 'weekly', s.name, s."start", true, 'account', null, 'NDIS Wizard Test Care Co'
+select ast_id('impl:'||s.id::text), s.plan_id, pb.id, 'active', s.amount, 'weekly', s.name, s."start", true, 'account', null, 'NDIS Wizard Test Care Co'
 from ast_services s left join ast_plan_budgets pb on pb.plan_id = s.plan_id and pb.support_category = s.support_category
 on conflict (id) do nothing;
 insert into ast_plan_implementations(id, plan_id, plan_budget_id, status, amount, frequency, description, implemented_at, is_internal, provider_type, provider_id, provider_name) values
- (ast_id('impl:1:ot'), ast_id('plan:1'), ast_id('pb:1:15'), 'implemented', 800000, 'as_needed', 'OT assessment and equipment review', '2026-03-10', false, 'organisation', ast_id('org:1'), 'Hills Allied Health'),
- (ast_id('impl:8:bs'), ast_id('plan:8'), ast_id('pb:8:15'), 'implemented', 700000, 'monthly', 'Behaviour support plan and training', '2026-05-02', false, 'organisation', ast_id('org:2'), 'Northern Behaviour Support'),
- (ast_id('impl:14:15'), ast_id('plan:14'), ast_id('pb:14:15'), 'not_started', 1000000, null, 'Psychology - provider to be chosen', null, false, null, null, null)
+ (ast_id('impl:1:ot'), ast_id('plan:1'), ast_id('pb:1:15'), 'active', 800000, 'as_needed', 'OT assessment and equipment review', '2026-03-10', false, 'organisation', ast_id('org:1'), 'Hills Allied Health'),
+ (ast_id('impl:8:bs'), ast_id('plan:8'), ast_id('pb:8:15'), 'active', 700000, 'monthly', 'Behaviour support plan and training', '2026-05-02', false, 'organisation', ast_id('org:2'), 'Northern Behaviour Support'),
+ (ast_id('impl:14:15'), ast_id('plan:14'), ast_id('pb:14:15'), 'pending', 1000000, null, 'Psychology - provider to be chosen', null, false, null, null, null)
 on conflict (id) do nothing;
 
 insert into ast_participant_checkins(id, participant_id, type, date)
@@ -104,18 +104,18 @@ insert into ast_incidents(id, reference, participant_id, reported_by_id, type, s
  (ast_id('inc:12'), 'INC-2026-012', ast_id('p:8'), ast_id('user:5'), 'behaviour', 'minor', 'closed', 'no', null, ast_adl('2026-09-22','11:40'),
    'Oliver became verbally agitated at the Centrelink office after a long wait. Worker used the de-escalation strategies in the BSP; left the office and sat outside for 15 minutes. No one was hurt.',
    'Discussed with behaviour support practitioner 23 Sep. Future appointments to be booked first thing in the morning. Participant and worker debriefed.', ast_adl('2026-09-24','16:00'), ast_adl('2026-09-22','13:10')),
- (ast_id('inc:14'), 'INC-2026-014', ast_id('p:3'), ast_id('user:10'), 'fall', 'moderate', 'open', 'yes', null, ast_adl('2026-10-10','08:35'),
+ (ast_id('inc:14'), 'INC-2026-014', ast_id('p:3'), ast_id('user:10'), 'fall', 'moderate', 'reported', 'yes', null, ast_adl('2026-10-10','08:35'),
    'Chloe fell in the hallway while walking without her walker. Bruising to the left hip. GP visit arranged by her daughter the same day.',
    null, null, ast_adl('2026-10-10','09:20')),
- (ast_id('inc:15'), 'INC-2026-015', ast_id('p:10'), ast_id('user:7'), 'medication', 'minor', 'open', 'no', null, ast_adl('2026-10-15','09:10'),
+ (ast_id('inc:15'), 'INC-2026-015', ast_id('p:10'), ast_id('user:7'), 'medication', 'minor', 'reported', 'no', null, ast_adl('2026-10-15','09:10'),
    'Lucas''s morning Webster pack blister for Thursday was still full when the worker arrived; Wednesday''s prompt appears to have been missed.',
    'Team leader to check Wednesday''s shift note and speak with the worker.', null, ast_adl('2026-10-15','09:30'))
 on conflict (id) do nothing;
 
 insert into ast_feedback(id, reference, feedback_type, sentiment, status, subject_name, complainant_name, complainant_email, complainant_phone, details, follow_up_details, participant_id, created_at, updated_at) values
- (ast_id('fb:7'), 'FB-2026-007', 'complaint', 'negative', 'open', 'Rostering', 'Teresa Marino', 'teresa.marino@example', '0430 000 001',
+ (ast_id('fb:7'), 'FB-2026-007', 'complaint', 'negative', 'new', 'Rostering', 'Teresa Marino', 'teresa.marino@example', '0430 000 001',
    'Alex''s morning worker has been late three times in two weeks and twice nobody called to say so. He missed his gym session on the 16th as a result.', null, ast_id('p:1'), ast_adl('2026-09-29','15:20'), null),
- (ast_id('fb:8'), 'FB-2026-008', 'compliment', 'positive', 'closed', 'Support worker', 'Fiona McKenzie', 'parent.mckenzie@example', '0430 000 005',
+ (ast_id('fb:8'), 'FB-2026-008', 'compliment', 'positive', 'resolved', 'Support worker', 'Fiona McKenzie', 'parent.mckenzie@example', '0430 000 005',
    'Priya has been wonderful with Isla at Saturday sport. Isla now asks to go.', 'Passed on to Priya and her team leader.', ast_id('p:9'), ast_adl('2026-10-06','18:05'), ast_adl('2026-10-07','09:00'))
 on conflict (id) do nothing;
 
@@ -143,7 +143,7 @@ insert into ast_webhooks(id, description, url, event_types, is_enabled, created_
  (ast_id('wh:1'), 'NDIS Wizard listener (disabled in the demo)', 'https://example.invalid/astalty/webhook', array['participant.created','participant.updated','invoice_batch.finalised','incident.created','task.created'], false, '2026-10-01 00:00+00')
 on conflict (id) do nothing;
 insert into ast_exports(id, name, export_type, export_reason, status, created_at) values
- (ast_id('exp:1'), 'Participants export 2026-10-01', 'participants', 'Monthly audit', 'completed', '2026-10-01 01:00+00')
+ (ast_id('exp:1'), 'Participants export 2026-10-01', 'participant-export', 'Monthly audit', 'completed', '2026-10-01 01:00+00')
 on conflict (id) do nothing;
 
 -- ---------------------------------------------------------------- tidy: the seed is not a "change"

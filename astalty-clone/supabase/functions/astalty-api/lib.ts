@@ -14,7 +14,8 @@ export const CORS = {
 export class ApiError extends Error {
   constructor(public status: number, message: string, public errors?: Record<string, string[]>) { super(message); }
 }
-export const notFound = (what = "Record") => new ApiError(404, `No query results for model [${what}].`);
+export const notFound = (what = "Record", id?: string) => new ApiError(404, `No query results for model [App\\Models\\${what}]${id ? " " + id : ""}`);
+export const invalidSort = (sort: string, allowed: string[]) => new ApiError(400, `Requested sort(s) \`${sort.replace(/^-/, "")}\` is not allowed. Allowed sort(s) are \`${allowed.join(", ")}\`.`);
 export function invalid(errors: Record<string, string[]>) { return new ApiError(422, "The given data was invalid.", errors); }
 
 export function json(body: unknown, status = 200, headers: Record<string, string> = {}) {
@@ -73,7 +74,7 @@ export function sortOf(c: Ctx, allowed: Record<string, string>, def: string): [s
   const raw = q(c, "sort") || def;
   const desc = raw.startsWith("-");
   const name = desc ? raw.slice(1) : raw;
-  if (!allowed[name]) throw invalid({ sort: [`The selected sort is invalid. Allowed: ${Object.keys(allowed).join(", ")}.`] });
+  if (!allowed[name]) throw invalidSort(raw, Object.keys(allowed));
   return [allowed[name], !desc];
 }
 export async function run<T = any>(query: any, p: Page): Promise<{ rows: T[]; total: number }> {
@@ -81,9 +82,9 @@ export async function run<T = any>(query: any, p: Page): Promise<{ rows: T[]; to
   return { rows: must(r) as T[], total: r.count ?? 0 };
 }
 export async function one<T = any>(table: string, id: string, select = "*", what?: string): Promise<T> {
-  if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound(what);
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound(what, id);
   const r = must(await db.from(table).select(select).eq("id", id).maybeSingle());
-  if (!r) throw notFound(what);
+  if (!r) throw notFound(what, id);
   return r as T;
 }
 

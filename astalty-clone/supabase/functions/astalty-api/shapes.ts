@@ -1,8 +1,10 @@
 // Astalty clone · resource shapes (match the public OpenAPI resources as closely as the replica's data allows)
 import { cents, dateOnly, db, initials, iso, must, name, todayIn } from "./lib.ts";
 
-export const userRef = (u: any) => u ? { id: u.id, name: name(u) } : null;
-export const participantRef = (p: any) => p ? { id: p.id, name: [p.first_name, p.last_name].filter(Boolean).join(" ") } : null;
+// Reference objects carry a superset of the fields the various *Resource references declare; the
+// spec-driven serializer keeps only the ones each endpoint publishes.
+export const userRef = (u: any) => u ? { id: u.id, name: name(u), first_name: u.first_name, last_name: u.last_name, email: u.email ?? null } : null;
+export const participantRef = (p: any) => p ? { id: p.id, name: [p.first_name, p.last_name].filter(Boolean).join(" "), full_name: [p.first_name, p.last_name].filter(Boolean).join(" "), first_name: p.first_name, last_name: p.last_name } : null;
 
 export function participant(p: any, extra: Record<string, unknown> = {}) {
   return {
@@ -35,7 +37,7 @@ export const implementation = (i: any) => ({
 });
 export function serviceStatus(s: any, today = todayIn()) {
   const st = dateOnly(s.start)!, en = dateOnly(s.end)!;
-  return today < st ? "upcoming" : today > en ? "expired" : "active";
+  return today < st ? "upcoming" : today > en ? "expired" : "current";
 }
 export const chargeItem = (c: any) => ({ id: c.id, number: c.number, reference: c.reference, name: c.name, price: c.price, unit: c.unit, gst_code: c.gst_code, default_claim_type: c.default_claim_type, archived_at: iso(c.archived_at) });
 export const chargeItemSet = (s: any) => ({ id: s.id, name: s.name, reference: s.reference, charge_rate_pattern: s.charge_rate_pattern, gst_code: s.gst_code, archived_at: iso(s.archived_at) });
@@ -98,8 +100,9 @@ export const task = (t: any, extra: Record<string, unknown> = {}) => ({
   id: t.id, title: t.title, start_time: iso(t.start_time), duration: t.duration, billable: t.billable, completed: t.completed,
   participant: participantRef(t.ast_participants), user: t.ast_users ? { id: t.ast_users.id, name: name(t.ast_users), email: t.ast_users.email } : null, ...extra,
 });
+const chargeStatus = (s: string) => s === "uninvoiced" ? "pending" : s;
 export const taskCharge = (c: any) => ({
-  id: c.id, date: dateOnly(c.date), quantity: c.quantity == null ? null : Number(c.quantity), unit_cost: c.unit_cost, total_cost: cents(c.total_cost), status: c.status, is_primary: c.is_primary, source: c.source,
+  id: c.id, date: dateOnly(c.date), quantity: c.quantity == null ? null : Number(c.quantity), unit_cost: c.unit_cost, total_cost: cents(c.total_cost), status: chargeStatus(c.status), is_primary: c.is_primary, source: c.source,
   charge_item: c.ast_charge_items ? chargeItem(c.ast_charge_items) : null, invoice: c.invoice_id ? { id: c.invoice_id } : null,
 });
 export const invoiceCharge = (c: any) => ({
@@ -121,6 +124,7 @@ export const incident = (i: any) => ({
 export const feedback = (f: any) => ({
   id: f.id, reference: f.reference, feedback_type: f.feedback_type, sentiment: f.sentiment, status: f.status, subject_name: f.subject_name, complainant_name: f.complainant_name, complainant_email: f.complainant_email,
   complainant_phone: f.complainant_phone, details: f.details, follow_up_details: f.follow_up_details, archived_at: iso(f.archived_at), created_at: iso(f.created_at), updated_at: iso(f.updated_at), participant: participantRef(f.ast_participants),
+  assignee: null, form_submission: null,
 });
 export const referral = (r: any) => ({ id: r.id, reference: r.reference, participant_name: r.participant_name, status: r.status, details: r.details, form_submission: null, archived_at: iso(r.archived_at), created_at: iso(r.created_at), updated_at: iso(r.updated_at) });
 export const user = (u: any, extra: Record<string, unknown> = {}) => ({ id: u.id, first_name: u.first_name, last_name: u.last_name, email: u.email, employment_title: u.employment_title, status: u.status, type: u.type, role: u.role, mobile: u.mobile, employment_basis: u.employment_basis, ...extra });
@@ -131,8 +135,8 @@ export function recordStatus(r: any, today = todayIn()) {
   const soon = new Date(today); soon.setDate(soon.getDate() + 30);
   return e <= soon.toISOString().slice(0, 10) ? "expiring" : "current";
 }
-export const userRecord = (r: any) => ({ id: r.id, name: r.name ?? r.ast_user_record_types?.name, reference: r.reference, issue_date: dateOnly(r.issue_date), expiry_date: dateOnly(r.expiry_date), status: recordStatus(r), created_at: iso(r.created_at), user: userRef(r.ast_users), user_record_type: r.ast_user_record_types ? { id: r.ast_user_record_types.id, name: r.ast_user_record_types.name } : null });
-export const participantRecord = (r: any) => ({ id: r.id, name: r.name ?? r.ast_participant_record_types?.name, reference: r.reference, issue_date: dateOnly(r.issue_date), expiry_date: dateOnly(r.expiry_date), status: recordStatus(r), created_at: iso(r.created_at), participant: participantRef(r.ast_participants), participant_record_type: r.ast_participant_record_types ? { id: r.ast_participant_record_types.id, name: r.ast_participant_record_types.name } : null });
+export const userRecord = (r: any) => ({ id: r.id, name: r.name ?? r.ast_user_record_types?.name, reference: r.reference, issue_date: dateOnly(r.issue_date), expiry_date: dateOnly(r.expiry_date), status: recordStatus(r), created_at: iso(r.created_at), user: userRef(r.ast_users), record_type: r.ast_user_record_types ? { id: r.ast_user_record_types.id, name: r.ast_user_record_types.name, expires: r.ast_user_record_types.expires } : null });
+export const participantRecord = (r: any) => ({ id: r.id, name: r.name ?? r.ast_participant_record_types?.name, reference: r.reference, issue_date: dateOnly(r.issue_date), expiry_date: dateOnly(r.expiry_date), status: recordStatus(r), created_at: iso(r.created_at), participant: participantRef(r.ast_participants), record_type: r.ast_participant_record_types ? { id: r.ast_participant_record_types.id, name: r.ast_participant_record_types.name } : null });
 export const recordType = (t: any) => ({ id: t.id, name: t.name, expires: t.expires, requires_documents: t.requires_documents, created_at: iso(t.created_at) });
 export function riskLevel(score: number) { return score >= 16 ? "catastrophic" : score >= 10 ? "high" : score >= 5 ? "moderate" : "low"; }
 export const risk = (r: any) => ({
@@ -143,12 +147,12 @@ export const risk = (r: any) => ({
   controls: (r.ast_participant_risk_controls || []).map(control),
 });
 export const control = (c: any) => ({ id: c.id, title: c.title, description: c.description, created_at: iso(c.created_at) });
-export const document = (d: any) => ({ id: d.id, name: d.name, file_extension: d.file_extension, created_at: iso(d.created_at), document_category: d.ast_document_categories ? { id: d.ast_document_categories.id, name: d.ast_document_categories.name } : null });
+export const document = (d: any) => ({ id: d.id, name: d.name, file_extension: d.file_extension, created_at: iso(d.created_at), categories: d.ast_document_categories ? [{ id: d.ast_document_categories.id, name: d.ast_document_categories.name }] : [] });
 export const documentCategory = (c: any) => ({ id: c.id, name: c.name, archived_at: iso(c.archived_at), created_at: iso(c.created_at) });
 export const contact = (c: any) => ({ id: c.id, full_name: name(c) || "", first_name: c.first_name, last_name: c.last_name, email: c.email, phone: c.phone, mobile: c.mobile, dob: dateOnly(c.dob), gender: c.gender, occupation: c.occupation, description: c.description, preferred_contact_method: c.preferred_contact_method, organisation: c.organisation_id ? { id: c.organisation_id } : null, archived_at: iso(c.archived_at), created_at: iso(c.created_at) });
 export const organisation = (o: any) => ({ id: o.id, name: o.name, type: o.type, abn: o.abn, email: o.email, phone: o.phone, website: o.website, description: o.description, ndis_registered: o.ndis_registered, registration_number: o.registration_number });
 export const site = (s: any) => ({ id: s.id, name: s.name, type: s.type, description: s.description, capacity: s.capacity, default_support_type: s.default_support_type, archived_at: iso(s.archived_at), created_at: iso(s.created_at), address: s.address_1 ? { address_1: s.address_1, suburb: s.suburb, state: s.state, postcode: s.postcode, formatted: [s.address_1, s.suburb, [s.state, s.postcode].filter(Boolean).join(" ")].filter(Boolean).join(", ") } : null, site_manager: userRef(s.ast_users), tags: [] });
-export const signatureRequest = (s: any) => ({ id: s.id, title: s.title, platform: s.platform, status: s.status, is_test: s.is_test, expires_at: iso(s.expires_at), created_at: iso(s.created_at), owner: s.owner_id ? { type: s.owner_type, id: s.owner_id } : null, participant: s.participant_id ? { id: s.participant_id } : null });
+export const signatureRequest = (s: any) => ({ id: s.id, title: s.title, platform: s.platform, status: s.status, is_test: s.is_test, expires_at: iso(s.expires_at), created_at: iso(s.created_at), owner: s.participant_id ? { type: "participant", id: s.participant_id, name: s.ast_participants ? name(s.ast_participants) : null } : null, requested_by: userRef(s.ast_users) });
 export const form = (f: any) => ({ id: f.id, name: f.name, type: f.type, created_at: iso(f.created_at) });
 export const formSubmission = (s: any) => ({ id: s.id, submitted_at: iso(s.submitted_at), submitted_url: null, archived_at: iso(s.archived_at), created_at: iso(s.created_at), form: s.ast_forms ? form(s.ast_forms) : null, fields: s.fields || [] });
 export const publicHoliday = (h: any) => ({ id: h.id, name: h.name, date: dateOnly(h.date), state: h.state, timezone: h.timezone, start_time: iso(new Date(`${dateOnly(h.date)}T00:00:00+09:30`), h.timezone), end_time: iso(new Date(`${dateOnly(h.date)}T23:59:59+09:30`), h.timezone), custom: h.custom, public_holiday_groups: [], excluded_public_holiday_groups: [] });

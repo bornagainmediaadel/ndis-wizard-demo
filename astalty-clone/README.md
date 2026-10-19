@@ -9,7 +9,7 @@ No real Astalty account or data is involved.
 | What | Where |
 |---|---|
 | API base | `https://qzzlxhreshuxahocllwm.supabase.co/functions/v1/astalty-api` |
-| Endpoints | `/public/v1/...` as in Astalty's reference, plus `/changes` and `/demo/planted` |
+| Endpoints | `/public/v1/...` exactly as in Astalty's reference; replica-only helpers under `/_replica/changes`, `/_replica/planted`, `/_replica/conformance` |
 | OpenAPI | `GET /docs.json` (Astalty's published spec with the server URL rewritten) |
 | Console | `astalty-clone/console.html` on the demo site (sign in with an API token) |
 | API docs page | `astalty-clone/docs.html` on the demo site |
@@ -18,6 +18,21 @@ No real Astalty account or data is involved.
 
 The function root (`/`) also serves the console, but Supabase serves HTML from the shared
 `supabase.co` domain as plain text, so use the GitHub Pages copies above.
+
+## Fidelity
+
+The replica is meant to be swapped for the real API by changing only `ASTALTY_API_BASE` and the token:
+
+- Routing, success codes, allowed `filter[...]`/`sort` values, request validation and the shape of every
+  response are taken at runtime from Astalty's published OpenAPI document (`astalty_api_spec`), so a
+  response can only contain the properties the real API documents, and unknown filters or sorts are
+  rejected the way Laravel's query builder rejects them.
+- Timestamps are UTC with a `+00:00` offset, dates are `YYYY-MM-DDT00:00:00+00:00`, `dob` is `YYYY-MM-DD`,
+  money is integer cents, as in Astalty's examples.
+- Errors use Laravel's wording (`Unauthenticated.`, `This action is unauthorized.`, `No query results for
+  model [...]`, `The route ... could not be found.`, validation `message` + `errors`).
+- `GET /_replica/conformance` replays 80 representative requests through the pipeline and validates every
+  response against the schema (required properties, types, enums, timestamp format).
 
 ## Files
 
@@ -37,7 +52,7 @@ page passes the switch through when it is opened with `?source=astalty`.
 
 ## Planted errors
 
-`GET /demo/planted` lists the 19 problems hidden in the data (a Saturday billed at the weekday
+`GET /_replica/planted` lists the 19 problems hidden in the data (a Saturday billed at the weekday
 rate, a duplicate charge, an invoice total that does not add up, an expired worker screening on
 the roster, missing progress notes, an unreported fall, an overdue risk review, and so on) so the
 agents' findings can be checked against a known answer.

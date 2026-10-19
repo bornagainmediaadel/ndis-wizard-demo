@@ -1,9 +1,12 @@
 // Astalty clone · entry point
-// A synthetic replica of the Astalty public API (bearer token, /public/v1, {data, meta} envelopes)
-// backed by the ast_* tables, for testing the NDIS Wizard. Synthetic data only.
-import { ApiError, authenticate, CORS, Ctx, db, FN_SLUG, html, json, must } from "./lib.ts";
+// A synthetic replica of the Astalty public API for testing the NDIS Wizard. Routing, success
+// codes, query/body validation and the shape of every response come from Astalty's own OpenAPI
+// document (astalty_api_spec), so a client written against this replica sees exactly what the
+// real API returns. Synthetic data only.
+import { ApiError, authenticate, CORS, Ctx, FN_SLUG, html, json } from "./lib.ts";
 import { ROUTES } from "./routes.ts";
 import { consolePage, docsPage } from "./ui.ts";
+import { loadSpec, matchSpec, serialize, validateBody, validateQuery } from "./serialize.ts";
 
 function publicBase(url: URL) {
   const i = url.pathname.indexOf(`/${FN_SLUG}`);
@@ -11,14 +14,31 @@ function publicBase(url: URL) {
   if (!prefix.startsWith("/functions/v1")) prefix = "/functions/v1" + prefix;
   return `https://${url.host}${prefix}/${FN_SLUG}`;
 }
-
-let SPEC: any = null;
-async function spec(base: string) {
-  if (!SPEC) {
-    const r = must(await db.from("astalty_api_spec").select("spec").eq("id", 1).maybeSingle()) as any;
-    SPEC = r?.spec ?? { openapi: "3.1.0", info: { title: "Astalty" }, paths: {} };
+async function specFor(base: string) {
+  const spec = await loadSpec();
+  return { ...spec, servers: [{ url: base }], info: { ...spec.info, title: "Astalty (NDIS Wizard test replica)", description: "Synthetic replica of the Astalty public API. Authenticate with `Authorization: Bearer <token>`. Responses follow this document exactly; replica-only helpers live under /_replica." } };
+}
+function findHandler(method: string, path: string) {
+  for (const r of ROUTES) {
+    const m = path.match(r.re);
+    if (m && r.method === method) {
+      const params: Record<string, string> = {};
+      r.keys.forEach((k, idx) => (params[k] = decodeURIComponent(m[idx + 1])));
+      return { r, params };
+    }
   }
-  return { ...SPEC, servers: [{ url: base }], info: { ...SPEC.info, title: "Astalty (NDIS Wizard test replica)", description: "Synthetic replica of the Astalty public API. Authenticate with `Authorization: Bearer <token>`. Replica extras: GET /changes and GET /demo/planted." } };
+  return null;
+}
+async function readBody(req: Request, method: string) {
+  if (method === "GET") return {};
+  const ct = req.headers.get("content-type") || "";
+  if (ct.includes("application/json")) {
+    const t = await req.text();
+    if (!t.trim()) return {};
+    try { return JSON.parse(t); } catch { throw new ApiError(400, "Malformed JSON body."); }
+  }
+  if (ct.includes("form")) return Object.fromEntries((await req.formData()).entries());
+  return {};
 }
 
 Deno.serve(async (req) => {
@@ -27,38 +47,41 @@ Deno.serve(async (req) => {
   const base = publicBase(url);
   const i = url.pathname.indexOf(`/${FN_SLUG}`);
   const path = (i >= 0 ? url.pathname.slice(i + FN_SLUG.length + 1) : url.pathname) || "/";
+  const method = req.method.toUpperCase();
   try {
-    if (req.method === "GET" && (path === "/" || path === "" || path === "/app")) return html(consolePage(base));
-    if (req.method === "GET" && path === "/docs") return html(docsPage(base));
-    if (req.method === "GET" && path === "/docs.json") return json(await spec(base));
-    if (req.method === "GET" && path === "/health") return json({ ok: true, name: "Astalty clone", base });
+    if (method === "GET" && (path === "/" || path === "" || path === "/app")) return html(consolePage(base));
+    if (method === "GET" && path === "/docs") return html(docsPage(base));
+    if (method === "GET" && path === "/docs.json") return json(await specFor(base));
+    if (method === "GET" && path === "/health") return json({ ok: true, name: "Astalty clone", base });
+    await loadSpec();
 
-    let method = req.method.toUpperCase();
-    let pathMatched = false, match: { r: typeof ROUTES[number]; m: RegExpMatchArray } | null = null;
-    for (const r of ROUTES) {
-      const m = path.match(r.re);
-      if (!m) continue;
-      pathMatched = true;
-      if (r.method === method) { match = { r, m }; break; }
+    // Replica-only helpers (not part of Astalty's API): change log, planted errors, conformance check.
+    if (path.startsWith("/_replica/")) {
+      const h = findHandler(method, path);
+      if (!h) throw new ApiError(404, `The route ${path.replace(/^\//, "")} could not be found.`);
+      const key = await authenticate(req);
+      const ctx: Ctx = { req, method, path, url, query: url.searchParams, params: h.params, body: await readBody(req, method), key, base };
+      const out = await h.r.fn(ctx);
+      return out instanceof Response ? out : json(out ?? {});
     }
-    if (!match) throw new ApiError(pathMatched ? 405 : 404, pathMatched ? `The ${method} method is not supported for this route.` : "Not Found.");
+
+    const hit = matchSpec(method, path);
+    if (!hit) throw new ApiError(404, `The route ${path.replace(/^\//, "")} could not be found.`);
+    if ("allowed" in hit) throw new ApiError(405, `The ${method} method is not supported for route ${path.replace(/^\//, "")}. Supported methods: ${hit.allowed.join(", ")}.`);
 
     const key = await authenticate(req);
-    if (key.permission === "read" && method !== "GET") throw new ApiError(403, "This API key is read only.");
+    if (key.permission === "read" && method !== "GET") throw new ApiError(403, "This action is unauthorized.");
+    const body = await readBody(req, method);
+    if (method === "GET") validateQuery(hit.op, url.searchParams);
+    else validateBody(hit.op, body);
 
-    let body: any = {};
-    if (method !== "GET") {
-      const ct = req.headers.get("content-type") || "";
-      if (ct.includes("application/json")) { const t = await req.text(); if (t.trim()) { try { body = JSON.parse(t); } catch { throw new ApiError(400, "Malformed JSON body."); } } }
-      else if (ct.includes("form")) body = Object.fromEntries((await req.formData()).entries());
-    }
-    const params: Record<string, string> = {};
-    match.r.keys.forEach((k, idx) => (params[k] = decodeURIComponent(match!.m[idx + 1])));
-    const ctx: Ctx = { req, method, path, url, query: url.searchParams, params, body, key, base };
-    const out = await match.r.fn(ctx);
+    const h = findHandler(method, path);
+    if (!h) throw new ApiError(501, "This endpoint exists in Astalty but is not implemented in the replica.");
+    const ctx: Ctx = { req, method, path, url, query: url.searchParams, params: { ...hit.pp, ...h.params }, body, key, base };
+    const out = await h.r.fn(ctx);
     if (out instanceof Response) return out;
-    if (out === null || out === undefined) return new Response(null, { status: 204, headers: CORS });
-    return json(out, method === "POST" && !/\/(archive|unarchive|finalise|void|payment-allocations|information-items)$/.test(path) ? 201 : 200);
+    const payload = out === null || out === undefined ? {} : serialize(hit.op.okSchema, out);
+    return json(payload, hit.op.ok);
   } catch (e) {
     if (e instanceof ApiError) return json(e.errors ? { message: e.message, errors: e.errors } : { message: e.message }, e.status, e.status === 401 ? { "WWW-Authenticate": "Bearer" } : {});
     console.error(e);
