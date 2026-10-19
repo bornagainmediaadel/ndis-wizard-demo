@@ -2,6 +2,7 @@
 import { ApiError, attribute, csv, Ctx, db, emit, filter, invalid, iso, listOf, must, need, notFound, one, oneOf, paging, parseWhen, pick, q, run, sortOf, TZ, todayIn } from "./lib.ts";
 import * as S from "./shapes.ts";
 import { matchSpec, serialize, specOps, validate } from "./serialize.ts";
+import { compare } from "./compare.ts";
 
 type Handler = (c: Ctx) => Promise<unknown>;
 export const ROUTES: { method: string; re: RegExp; keys: string[]; fn: Handler; pattern: string }[] = [];
@@ -818,6 +819,8 @@ export const PLANTED = [
   { code: "P19", area: "complaints", summary: "Complaint FB-2026-007 from Alex Marino's mother about late workers has been open since 29 Sep with no follow-up." },
 ];
 route("GET", `/_replica/planted`, async () => ({ data: PLANTED }));
+// Structural comparison against a real account: pass x-real-token (and optionally x-real-base). Reports paths and kinds only, never values.
+route("GET", `/_replica/compare`, async (c) => compare(c, ROUTES));
 route("GET", `/_replica/changes`, async (c) => {
   const p = paging(c, 50);
   let qb = db.from("ast_change_log").select("*", { count: "exact" });
