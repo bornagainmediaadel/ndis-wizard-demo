@@ -3,7 +3,7 @@ import { cents, dateOnly, db, initials, iso, must, name, todayIn } from "./lib.t
 
 // Reference objects carry a superset of the fields the various *Resource references declare; the
 // spec-driven serializer keeps only the ones each endpoint publishes.
-export const userRef = (u: any) => u ? { id: u.id, name: name(u), first_name: u.first_name, last_name: u.last_name, email: u.email ?? null } : null;
+export const userRef = (u: any) => u ? { id: u.id, name: name(u), full_name: name(u), first_name: u.first_name, last_name: u.last_name, email: u.email ?? null } : null;
 export const participantRef = (p: any) => p ? { id: p.id, name: [p.first_name, p.last_name].filter(Boolean).join(" "), full_name: [p.first_name, p.last_name].filter(Boolean).join(" "), first_name: p.first_name, last_name: p.last_name } : null;
 
 export function participant(p: any, extra: Record<string, unknown> = {}) {
@@ -18,7 +18,7 @@ export function participant(p: any, extra: Record<string, unknown> = {}) {
     ...extra,
   };
 }
-export const tag = (t: any) => ({ id: t.id, name: t.name, colour: t.colour });
+export const tag = (t: any) => ({ id: t.id, name: t.name, colour: t.colour, created_at: iso(t.created_at) });
 export const alert = (a: any) => ({ id: a.id, title: a.title, content: a.content, type: a.type, visible_to_support_workers: a.visible_to_support_workers, visible_when_scheduling: a.visible_when_scheduling, created_at: iso(a.created_at) });
 export const address = (a: any) => ({
   id: a.id, type: a.type, label: a.label, address_1: a.address_1, address_2: a.address_2, address_3: a.address_3, suburb: a.suburb, state: a.state, postcode: a.postcode,
@@ -33,7 +33,7 @@ export const planBudget = (b: any) => ({ id: b.id, amount: cents(b.amount), mana
 export const implementation = (i: any) => ({
   id: i.id, status: i.status, amount: i.amount == null ? null : cents(i.amount), frequency: i.frequency, description: i.description, implemented_at: dateOnly(i.implemented_at), is_internal: i.is_internal,
   plan_budget: i.ast_plan_budgets ? { id: i.ast_plan_budgets.id, support_category: supportCategory(i.ast_plan_budgets.ast_support_categories) } : null,
-  service_provider: i.provider_name ? { type: i.provider_type, id: i.provider_id, name: i.provider_name } : null,
+  service_provider: i.provider_type ? { type: i.provider_type, id: String(i.provider_id), name: i.provider_name } : null,
 });
 export function serviceStatus(s: any, today = todayIn()) {
   const st = dateOnly(s.start)!, en = dateOnly(s.end)!;
@@ -106,7 +106,7 @@ export const taskCharge = (c: any) => ({
   charge_item: c.ast_charge_items ? chargeItem(c.ast_charge_items) : null, invoice: c.invoice_id ? { id: c.invoice_id } : null,
 });
 export const invoiceCharge = (c: any) => ({
-  id: c.id, date: dateOnly(c.date), quantity: c.quantity == null ? null : Number(c.quantity), unit_cost: c.unit_cost, total_cost: cents(c.total_cost), claim_type: c.claim_type, claim_reference: c.claim_reference,
+  id: c.id, date: dateOnly(c.date), quantity: c.quantity == null ? null : Number(c.quantity), unit_cost: c.unit_cost, total_cost: cents(c.total_cost), claim_type: c.claim_type ?? "Direct", claim_reference: c.claim_reference,
   cancellation_reason: c.cancellation_reason, charge_item: c.ast_charge_items ? { id: c.ast_charge_items.id, name: c.ast_charge_items.name, reference: c.ast_charge_items.reference } : null,
   support: c.support_id ? { id: c.support_id } : null, task: c.task_id ? { id: c.task_id } : null,
 });
@@ -137,7 +137,8 @@ export function recordStatus(r: any, today = todayIn()) {
 }
 export const userRecord = (r: any) => ({ id: r.id, name: r.name ?? r.ast_user_record_types?.name, reference: r.reference, issue_date: dateOnly(r.issue_date), expiry_date: dateOnly(r.expiry_date), status: recordStatus(r), created_at: iso(r.created_at), user: userRef(r.ast_users), record_type: r.ast_user_record_types ? { id: r.ast_user_record_types.id, name: r.ast_user_record_types.name, expires: r.ast_user_record_types.expires } : null });
 export const participantRecord = (r: any) => ({ id: r.id, name: r.name ?? r.ast_participant_record_types?.name, reference: r.reference, issue_date: dateOnly(r.issue_date), expiry_date: dateOnly(r.expiry_date), status: recordStatus(r), created_at: iso(r.created_at), participant: participantRef(r.ast_participants), record_type: r.ast_participant_record_types ? { id: r.ast_participant_record_types.id, name: r.ast_participant_record_types.name } : null });
-export const recordType = (t: any) => ({ id: t.id, name: t.name, expires: t.expires, requires_documents: t.requires_documents, created_at: iso(t.created_at) });
+export const recordType = (t: any) => ({ id: t.id, name: t.name, expires: t.expires, requires_documents: t.requires_documents, created_at: iso(t.created_at), required_for_participant_tags: [] });
+export const userRecordType = (t: any) => ({ id: t.id, name: t.name, expires: t.expires, requires_verification: !!t.requires_verification, is_self_service: !!t.is_self_service, archived_at: iso(t.archived_at), created_at: iso(t.created_at) });
 export function riskLevel(score: number) { return score >= 16 ? "catastrophic" : score >= 10 ? "high" : score >= 5 ? "moderate" : "low"; }
 export const risk = (r: any) => ({
   id: r.id, title: r.title, description: r.description, likelihood: r.likelihood, consequence: r.consequence, residual_likelihood: r.residual_likelihood,
@@ -151,15 +152,23 @@ export const document = (d: any) => ({ id: d.id, name: d.name, file_extension: d
 export const documentCategory = (c: any) => ({ id: c.id, name: c.name, archived_at: iso(c.archived_at), created_at: iso(c.created_at) });
 export const contact = (c: any) => ({ id: c.id, full_name: name(c) || "", first_name: c.first_name, last_name: c.last_name, email: c.email, phone: c.phone, mobile: c.mobile, dob: dateOnly(c.dob), gender: c.gender, occupation: c.occupation, description: c.description, preferred_contact_method: c.preferred_contact_method, organisation: c.organisation_id ? { id: c.organisation_id } : null, archived_at: iso(c.archived_at), created_at: iso(c.created_at) });
 export const organisation = (o: any) => ({ id: o.id, name: o.name, type: o.type, abn: o.abn, email: o.email, phone: o.phone, website: o.website, description: o.description, ndis_registered: o.ndis_registered, registration_number: o.registration_number });
-export const site = (s: any) => ({ id: s.id, name: s.name, type: s.type, description: s.description, capacity: s.capacity, default_support_type: s.default_support_type, archived_at: iso(s.archived_at), created_at: iso(s.created_at), address: s.address_1 ? { address_1: s.address_1, suburb: s.suburb, state: s.state, postcode: s.postcode, formatted: [s.address_1, s.suburb, [s.state, s.postcode].filter(Boolean).join(" ")].filter(Boolean).join(", ") } : null, site_manager: userRef(s.ast_users), tags: [] });
-export const signatureRequest = (s: any) => ({ id: s.id, title: s.title, platform: s.platform, status: s.status, is_test: s.is_test, expires_at: iso(s.expires_at), created_at: iso(s.created_at), owner: s.participant_id ? { type: "participant", id: s.participant_id, name: s.ast_participants ? name(s.ast_participants) : null } : null, requested_by: userRef(s.ast_users) });
-export const form = (f: any) => ({ id: f.id, name: f.name, type: f.type, created_at: iso(f.created_at) });
+export const site = (s: any) => ({
+  id: s.id, name: s.name, type: s.type, description: s.description, capacity: s.capacity, default_support_type: s.default_support_type, archived_at: iso(s.archived_at), created_at: iso(s.created_at),
+  address: s.address_1 ? { id: s.address_id, address_1: s.address_1, address_2: s.address_2 ?? null, suburb: s.suburb, state: s.state, postcode: s.postcode, country: s.country ?? "Australia", lat: s.lat ?? null, lng: s.lng ?? null, traditional_place_name: s.traditional_place_name ?? null, details: s.address_details ?? null, formatted: [s.address_1, s.address_2, s.suburb, [s.state, s.postcode].filter(Boolean).join(" ")].filter(Boolean).join(", ") } : null,
+  site_manager: userRef(s.ast_users), tags: [],
+});
+export const signatureRequest = (s: any) => ({
+  id: s.id, title: s.title, platform: s.platform, status: s.status, is_test: s.is_test, expires_at: iso(s.expires_at), created_at: iso(s.created_at),
+  owner: s.owner_id || s.participant_id ? { type: s.owner_type ?? "participant", id: s.owner_id ?? s.participant_id, name: s.ast_participants ? name(s.ast_participants) : s.title } : null,
+  requested_by: userRef(s.ast_users),
+});
+export const form = (f: any) => ({ id: f.id, name: f.name, description: f.description ?? null, status: f.status ?? "published", type: f.type, usage: f.usage ?? "general", hosted_url: f.hosted_url ?? `https://qzzlxhreshuxahocllwm.supabase.co/functions/v1/astalty-api/form/${f.id}`, archived_at: iso(f.archived_at), created_at: iso(f.created_at) });
 export const formSubmission = (s: any) => ({ id: s.id, submitted_at: iso(s.submitted_at), submitted_url: null, archived_at: iso(s.archived_at), created_at: iso(s.created_at), form: s.ast_forms ? form(s.ast_forms) : null, fields: s.fields || [] });
 export const publicHoliday = (h: any) => ({ id: h.id, name: h.name, date: dateOnly(h.date), state: h.state, timezone: h.timezone, start_time: iso(new Date(`${dateOnly(h.date)}T00:00:00+09:30`), h.timezone), end_time: iso(new Date(`${dateOnly(h.date)}T23:59:59+09:30`), h.timezone), custom: h.custom, public_holiday_groups: [], excluded_public_holiday_groups: [] });
 export const webhook = (w: any) => ({ id: w.id, description: w.description, url: w.url, event_types: w.event_types, is_enabled: w.is_enabled, signing_secret: w.signing_secret, archived_at: iso(w.archived_at), created_at: iso(w.created_at) });
 export const exportRow = (e: any) => ({ id: e.id, name: e.name, export_type: e.export_type, export_reason: e.export_reason, status: e.status, failed_reason: e.failed_reason, last_downloaded_at: iso(e.last_downloaded_at), created_at: iso(e.created_at) });
-export const infoItem = (i: any) => ({ id: i.id, detail: i.detail, created_at: iso(i.created_at), updated_at: iso(i.updated_at), definition: i.ast_participant_information_item_defs ? infoDef(i.ast_participant_information_item_defs) : null });
-export const infoDef = (d: any) => ({ id: d.id, name: d.name, required: d.required, documents_allowed: d.documents_allowed, visible_to_support_workers: d.visible_to_support_workers });
+export const infoItem = (i: any) => ({ id: i.id, detail: i.detail, created_at: iso(i.created_at), updated_at: iso(i.updated_at), info_item: i.ast_participant_information_item_defs ? infoDef(i.ast_participant_information_item_defs) : null, documents: [] });
+export const infoDef = (d: any) => ({ id: d.id, name: d.name, required: d.required, order: d.order ?? 0, documents_allowed: d.documents_allowed, visible_to_support_workers: d.visible_to_support_workers, created_at: iso(d.created_at) });
 
 export async function latestCheckins(ids: string[]) {
   if (!ids.length) return new Map<string, any>();

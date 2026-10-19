@@ -79,13 +79,13 @@ insert into ast_users(id, first_name, last_name, email, mobile, employment_title
 on conflict (id) do nothing;
 
 -- worker compliance records
-insert into ast_user_record_types(id, name, expires) values
- (ast_id('urt:screening'), 'NDIS Worker Screening Check', true),
- (ast_id('urt:firstaid'),  'First Aid (HLTAID011)', true),
- (ast_id('urt:cpr'),       'CPR (HLTAID009)', true),
- (ast_id('urt:wwcc'),      'Working With Children Check', true),
- (ast_id('urt:licence'),   'Driver Licence', true),
- (ast_id('urt:orient'),    'NDIS Worker Orientation Module', false)
+insert into ast_user_record_types(id, name, expires, requires_verification, is_self_service, created_at) values
+ (ast_id('urt:screening'), 'NDIS Worker Screening Check', true, true, false, '2025-01-06 00:30+00'),
+ (ast_id('urt:firstaid'),  'First Aid (HLTAID011)', true, true, true, '2025-01-06 00:30+00'),
+ (ast_id('urt:cpr'),       'CPR (HLTAID009)', true, true, true, '2025-01-06 00:30+00'),
+ (ast_id('urt:wwcc'),      'Working With Children Check', true, true, false, '2025-01-06 00:30+00'),
+ (ast_id('urt:licence'),   'Driver Licence', true, false, true, '2025-01-06 00:30+00'),
+ (ast_id('urt:orient'),    'NDIS Worker Orientation Module', false, false, true, '2025-01-06 00:30+00')
 on conflict (id) do nothing;
 
 insert into ast_user_records(id, user_id, type_id, name, reference, issue_date, expiry_date)
@@ -112,11 +112,11 @@ insert into ast_organisations(id, name, type, abn, email, phone, ndis_registered
  (ast_id('org:3'), 'Local Area Coordination - Adelaide South', 'lac', null, 'lac.south@example', '1800 000 000', false, null)
 on conflict (id) do nothing;
 
-insert into ast_participant_tags(id, name, colour) values
- (ast_id('tag:sil'), 'SIL', '#2563eb'),
- (ast_id('tag:sc'), 'Support Coordination', '#7c3aed'),
- (ast_id('tag:high'), 'High Priority', '#dc2626'),
- (ast_id('tag:new'), 'New Participant', '#059669')
+insert into ast_participant_tags(id, name, colour, created_at) values
+ (ast_id('tag:sil'), 'SIL', '#2563eb', '2025-01-06 00:30+00'),
+ (ast_id('tag:sc'), 'Support Coordination', '#7c3aed', '2025-01-06 00:30+00'),
+ (ast_id('tag:high'), 'High Priority', '#dc2626', '2025-01-06 00:30+00'),
+ (ast_id('tag:new'), 'New Participant', '#059669', '2025-01-06 00:30+00')
 on conflict (id) do nothing;
 
 -- participants (14)
@@ -291,9 +291,9 @@ on conflict (id) do nothing;
 insert into ast_goal_plans(goal_id, plan_id) select g.id, p.id from ast_goals g join ast_ndis_plans p on p.participant_id = g.participant_id on conflict do nothing;
 
 -- sites
-insert into ast_sites(id, name, type, description, capacity, default_support_type, site_manager_id, address_1, suburb, state, postcode) values
- (ast_id('site:1'), 'Semaphore SIL house', 'sil_house', 'Three-bedroom SIL house', 3, 'supported_independent_living', ast_id('user:3'), '15 Semaphore Road', 'Semaphore', 'SA', '5019'),
- (ast_id('site:2'), 'Mile End hub', 'other', 'Group programs and cooking kitchen', 12, 'group_support', ast_id('user:3'), '61 Henley Beach Road', 'Mile End', 'SA', '5031')
+insert into ast_sites(id, name, type, description, capacity, default_support_type, site_manager_id, address_id, address_1, suburb, state, postcode, lat, lng, traditional_place_name) values
+ (ast_id('site:1'), 'Semaphore SIL house', 'sil_house', 'Three-bedroom SIL house', 3, 'supported_independent_living', ast_id('user:3'), ast_id('addr:site:1'), '15 Semaphore Road', 'Semaphore', 'SA', '5019', '-34.8393', '138.4817', 'Kaurna Country'),
+ (ast_id('site:2'), 'Mile End hub', 'other', 'Group programs and cooking kitchen', 12, 'group_support', ast_id('user:3'), ast_id('addr:site:2'), '61 Henley Beach Road', 'Mile End', 'SA', '5031', '-34.9289', '138.5716', 'Kaurna Country')
 on conflict (id) do nothing;
 
 -- document categories, participant record types, information items
@@ -306,9 +306,9 @@ insert into ast_participant_record_types(id, name, expires, requires_documents) 
  (ast_id('prt:consent'), 'Consent to share information', true, true), (ast_id('prt:bsp'), 'Behaviour Support Plan', true, true),
  (ast_id('prt:medplan'), 'Medication / health plan', true, false)
 on conflict (id) do nothing;
-insert into ast_participant_information_item_defs(id, name, required, documents_allowed, visible_to_support_workers) values
- (ast_id('pii:comms'), 'Communication preferences', true, false, true), (ast_id('pii:med'), 'Medications', true, true, true),
- (ast_id('pii:allerg'), 'Allergies', true, false, true), (ast_id('pii:emerg'), 'Emergency plan', false, true, true)
+insert into ast_participant_information_item_defs(id, name, required, documents_allowed, visible_to_support_workers, "order", created_at) values
+ (ast_id('pii:comms'), 'Communication preferences', true, false, true, 1, '2025-01-06 00:30+00'), (ast_id('pii:med'), 'Medications', true, true, true, 2, '2025-01-06 00:30+00'),
+ (ast_id('pii:allerg'), 'Allergies', true, false, true, 3, '2025-01-06 00:30+00'), (ast_id('pii:emerg'), 'Emergency plan', false, true, true, 4, '2025-01-06 00:30+00')
 on conflict (id) do nothing;
 
 -- participant records: plan + signed service agreement for everyone with a service; consent for most
@@ -322,10 +322,10 @@ on conflict (id) do nothing;
 -- PLANTED (P15): Ruby's consent expired and her service agreement was never signed
 insert into ast_participant_records(id, participant_id, type_id, name, reference, issue_date, expiry_date) values
  (ast_id('pr:13:consent'), ast_id('p:13'), ast_id('prt:consent'), 'Consent to share information', null, '2024-09-01', '2026-09-01') on conflict (id) do nothing;
-insert into ast_signature_requests(id, title, owner_type, owner_id, participant_id, platform, status, is_test, expires_at, created_at) values
- (ast_id('sig:13'), 'Service Agreement 2025-26 - Ruby Delacroix', 'user', ast_id('user:2'), ast_id('p:13'), 'docusign', 'expired', false, '2025-12-03 00:00+00', '2025-11-03 03:00+00'),
- (ast_id('sig:14'), 'Service Agreement 2026-27 - Harper Osei', 'user', ast_id('user:2'), ast_id('p:14'), 'docusign', 'awaiting_signatures', false, '2026-10-28 00:00+00', '2026-09-28 03:00+00'),
- (ast_id('sig:10'), 'Service Agreement 2026-27 - Lucas Abara', 'user', ast_id('user:2'), ast_id('p:10'), 'docusign', 'completed', false, null, '2026-08-25 03:00+00')
+insert into ast_signature_requests(id, title, owner_type, owner_id, requested_by_id, participant_id, platform, status, is_test, expires_at, created_at) values
+ (ast_id('sig:13'), 'Service Agreement 2025-26 - Ruby Delacroix', 'participant', ast_id('p:13'), ast_id('user:2'), ast_id('p:13'), 'docusign', 'expired', false, '2025-12-03 00:00+00', '2025-11-03 03:00+00'),
+ (ast_id('sig:14'), 'Service Agreement 2026-27 - Harper Osei', 'participant', ast_id('p:14'), ast_id('user:2'), ast_id('p:14'), 'docusign', 'awaiting_signatures', false, '2026-10-28 00:00+00', '2026-09-28 03:00+00'),
+ (ast_id('sig:10'), 'Service Agreement 2026-27 - Lucas Abara', 'participant', ast_id('p:10'), ast_id('user:2'), ast_id('p:10'), 'docusign', 'completed', false, null, '2026-08-25 03:00+00')
 on conflict (id) do nothing;
 
 insert into ast_documents(id, documentable_type, documentable_id, category_id, name, file_extension, size_bytes)
@@ -352,8 +352,10 @@ insert into ast_note_templates(id, name, content, usage) values
  (ast_id('nt:shift'), 'Shift note', 'Shift <start>–<end>. Supports provided: ... Participant wellbeing: ... Progress toward goals: ... Follow up: ...', 'support_notes'),
  (ast_id('nt:sc'), 'Support coordination contact', 'Contact type: ... Discussed: ... Actions: ... Time spent: ... min', 'task_notes')
 on conflict (id) do nothing;
-insert into ast_forms(id, name, type) values
- (ast_id('form:incident'), 'Incident report', 'incident'), (ast_id('form:referral'), 'Referral form', 'referral'), (ast_id('form:feedback'), 'Feedback and complaints', 'feedback')
+insert into ast_forms(id, name, description, type, usage, status, hosted_url, created_at) values
+ (ast_id('form:incident'), 'Incident report', 'Internal incident report completed by staff', 'internal', 'incident', 'published', 'https://qzzlxhreshuxahocllwm.supabase.co/functions/v1/astalty-api/form/'||ast_id('form:incident'), '2025-01-06 00:30+00'),
+ (ast_id('form:referral'), 'Referral form', 'Public referral form linked from the website', 'public', 'referral', 'published', 'https://qzzlxhreshuxahocllwm.supabase.co/functions/v1/astalty-api/form/'||ast_id('form:referral'), '2025-01-06 00:30+00'),
+ (ast_id('form:feedback'), 'Feedback and complaints', 'Public feedback and complaints form', 'public', 'feedback', 'published', 'https://qzzlxhreshuxahocllwm.supabase.co/functions/v1/astalty-api/form/'||ast_id('form:feedback'), '2025-01-06 00:30+00')
 on conflict (id) do nothing;
 
 reset session_replication_role;

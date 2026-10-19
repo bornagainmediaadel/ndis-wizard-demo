@@ -114,7 +114,7 @@ begin
       if done then
         insert into ast_charges(id, participant_id, charge_item_id, service_id, source, support_id, date, quantity, unit_cost, total_cost, claim_type, cancellation_reason, status, created_at)
         values (ast_id('chg:'||sid::text), ast_id('p:'||pat.p), ci, svc, 'support', sid, d, qty, price, round(qty * price),
-                case when cancelled then 'CANC' end, case when cancelled then 'Short notice cancellation by participant' end, 'uninvoiced', ts1)
+                case when cancelled then 'CANC' else 'Direct' end, case when cancelled then (case when h % 2 = 0 then 'NSDH' else 'NSDF' end) end, 'uninvoiced', ts1)
         on conflict (id) do nothing;
         if pat.kind = 'community' and not cancelled then
           insert into ast_charges(id, participant_id, charge_item_id, service_id, source, support_id, date, quantity, unit_cost, total_cost, claim_type, is_primary, status, created_at)

@@ -143,7 +143,8 @@ create table if not exists ast_contacts (
 create table if not exists ast_participant_tags (
   id uuid primary key default gen_random_uuid(),
   name text not null,
-  colour text
+  colour text,
+  created_at timestamptz not null default now()
 );
 
 create table if not exists ast_participants (
@@ -413,7 +414,9 @@ create table if not exists ast_sites (
   capacity int,
   default_support_type text,
   site_manager_id uuid references ast_users(id),
-  address_1 text, suburb text, state text, postcode text,
+  address_id uuid not null default gen_random_uuid(),
+  address_1 text, address_2 text, suburb text, state text, postcode text, country text not null default 'Australia',
+  lat text, lng text, traditional_place_name text, address_details text,
   archived_at timestamptz,
   created_at timestamptz not null default now()
 );
@@ -676,7 +679,9 @@ create table if not exists ast_participant_records (
 );
 create table if not exists ast_user_record_types (
   id uuid primary key default gen_random_uuid(),
-  name text not null, expires boolean not null default true
+  name text not null, expires boolean not null default true,
+  requires_verification boolean not null default false, is_self_service boolean not null default false,
+  archived_at timestamptz, created_at timestamptz not null default now()
 );
 create table if not exists ast_user_records (
   id uuid primary key default gen_random_uuid(),
@@ -690,7 +695,8 @@ create table if not exists ast_user_records (
 create table if not exists ast_participant_information_item_defs (
   id uuid primary key default gen_random_uuid(),
   name text not null, required boolean not null default false,
-  documents_allowed boolean not null default false, visible_to_support_workers boolean not null default true
+  documents_allowed boolean not null default false, visible_to_support_workers boolean not null default true,
+  "order" int not null default 0, created_at timestamptz not null default now()
 );
 create table if not exists ast_participant_information_items (
   id uuid primary key default gen_random_uuid(),
@@ -704,7 +710,8 @@ create table if not exists ast_participant_information_items (
 -- ---------------------------------------------------------------- forms, signatures, misc
 create table if not exists ast_forms (
   id uuid primary key default gen_random_uuid(),
-  name text not null, type text not null default 'general', created_at timestamptz not null default now()
+  name text not null, description text, type text not null default 'general', usage text not null default 'general',
+  status text not null default 'published', hosted_url text, archived_at timestamptz, created_at timestamptz not null default now()
 );
 create table if not exists ast_form_submissions (
   id uuid primary key default gen_random_uuid(),
@@ -721,6 +728,7 @@ create table if not exists ast_signature_requests (
   title text not null,
   owner_type text, owner_id uuid,
   participant_id uuid references ast_participants(id),
+  requested_by_id uuid references ast_users(id),
   platform text not null default 'astalty',
   status text not null default 'sent',
   is_test boolean not null default false,

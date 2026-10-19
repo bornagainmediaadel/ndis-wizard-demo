@@ -86,7 +86,7 @@ update ast_invoices set management_type = 'plan', plan_manager_id = null where i
 
 -- ---------------------------------------------------------------- plan implementations, check-ins
 insert into ast_plan_implementations(id, plan_id, plan_budget_id, status, amount, frequency, description, implemented_at, is_internal, provider_type, provider_id, provider_name)
-select ast_id('impl:'||s.id::text), s.plan_id, pb.id, 'active', s.amount, 'weekly', s.name, s."start", true, 'account', null, 'NDIS Wizard Test Care Co'
+select ast_id('impl:'||s.id::text), s.plan_id, pb.id, 'active', s.amount, 'weekly', s.name, s."start", true, 'account', ast_id('account'), 'NDIS Wizard Test Care Co'
 from ast_services s left join ast_plan_budgets pb on pb.plan_id = s.plan_id and pb.support_category = s.support_category
 on conflict (id) do nothing;
 insert into ast_plan_implementations(id, plan_id, plan_budget_id, status, amount, frequency, description, implemented_at, is_internal, provider_type, provider_id, provider_name) values

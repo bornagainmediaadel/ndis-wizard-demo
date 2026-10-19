@@ -163,7 +163,7 @@ route("GET", `${V}/participants/:participant/ndis-plans`, async (c) => {
 });
 route("GET", `${V}/participants/:participant/notes`, async (c) => {
   const id = idOf(c, "participant", "Participant"); await participantMustExist(id); const p = paging(c);
-  let qb = db.from("ast_notes").select("*, ast_users(id,first_name,last_name)", { count: "exact" }).eq("notable_type", "participant").eq("notable_id", id);
+  let qb = db.from("ast_notes").select("*, ast_users(id,first_name,last_name,email)", { count: "exact" }).eq("notable_type", "participant").eq("notable_id", id);
   const src = filter(c, "source"); if (src) { oneOf({ source: src }, "source", ["profile", "support", "task"]); qb = qb.eq("source_type", src); }
   const search = filter(c, "search"); if (search) qb = qb.ilike("content", `%${search}%`);
   const after = filter(c, "created_after"); if (after) qb = qb.gte("created_at", parseWhen(after, "filter.created_after"));
@@ -175,14 +175,14 @@ route("POST", `${V}/participants/:participant/notes`, async (c) => {
   const id = idOf(c, "participant", "Participant"); await participantMustExist(id);
   need(c.body, ["content"]); oneOf(c.body, "checkin_type", ["email", "face to face", "phone", "sms", "teleconsult"]);
   const row = { notable_type: "participant", notable_id: id, content: c.body.content, checkin_type: c.body.checkin_type ?? null, author_id: c.body.author?.id ?? null, source_type: "profile" };
-  const n = must(await db.from("ast_notes").insert(row).select("*, ast_users(id,first_name,last_name)").single());
+  const n = must(await db.from("ast_notes").insert(row).select("*, ast_users(id,first_name,last_name,email)").single());
   await attribute(c, [(n as any).id]);
   return { data: S.note(n) };
 });
 route("GET", `${V}/participants/:participant/current-services`, async (c) => {
   const id = idOf(c, "participant", "Participant"); await participantMustExist(id); const p = paging(c); const today = todayIn();
   const { rows, total } = await run(db.from("ast_services").select(SVC_SELECT, { count: "exact" }).eq("participant_id", id).lte("start", today).gte("end", today).order("name"), p);
-  return listOf(rows.map((s: any) => S.service(s)), total, p);
+  return listOf(await serviceRows(rows), total, p);
 });
 route("GET", `${V}/participants/:participant/budgets`, async (c) => {
   const id = idOf(c, "participant", "Participant"); await participantMustExist(id); const p = paging(c);
@@ -207,9 +207,9 @@ route("POST", `${V}/participants/:participant/risks`, async (c) => {
   return { data: S.risk(await one("ast_participant_risks", r.id, "*, ast_participant_risk_controls(*)", "Risk")) };
 });
 route("GET", `${V}/participants/:participant/public-holiday-groups`, async (c) => {
-  const id = idOf(c, "participant", "Participant"); await participantMustExist(id);
-  const rows = must(await db.from("ast_public_holiday_groups").select("*")) as any[];
-  return { data: rows.map((g) => ({ id: g.id, name: g.name })) };
+  const id = idOf(c, "participant", "Participant"); await participantMustExist(id); const p = paging(c);
+  const { rows, total } = await run(db.from("ast_public_holiday_groups").select("*", { count: "exact" }).order("name"), p);
+  return listOf(rows.map((g: any) => ({ id: g.id, name: g.name })), total, p);
 });
 route("GET", `${V}/risks/:risk`, async (c) => ({ data: S.risk(await one("ast_participant_risks", idOf(c, "risk", "Risk"), "*, ast_participant_risk_controls(*)", "Risk")) }));
 route("PUT", `${V}/risks/:risk`, async (c) => {
@@ -254,7 +254,7 @@ route("GET", `${V}/goals/:goal/tasks`, async (c) => {
 route("PUT", `${V}/notes/:note`, async (c) => {
   const id = idOf(c, "note", "Note"); await one("ast_notes", id, "id", "Note"); need(c.body, ["content"]);
   must(await db.from("ast_notes").update({ content: c.body.content, checkin_type: c.body.checkin_type ?? null }).eq("id", id)); await attribute(c, [id]);
-  return { data: S.note(await one("ast_notes", id, "*, ast_users(id,first_name,last_name)", "Note")) };
+  return { data: S.note(await one("ast_notes", id, "*, ast_users(id,first_name,last_name,email)", "Note")) };
 });
 route("GET", `${V}/notes/:note/documents`, async (c) => { const id = idOf(c, "note", "Note"); await one("ast_notes", id, "id", "Note"); return documentsFor(c, "note", id); });
 route("POST", `${V}/notes/:note/documents`, async (c) => { const id = idOf(c, "note", "Note"); await one("ast_notes", id, "id", "Note"); return addDocument(c, "note", id); });
@@ -276,13 +276,22 @@ route("GET", `${V}/ndis-plans/:plan/implementations`, async (c) => {
   return listOf(rows.map(S.implementation), total, p);
 });
 const SVC_SELECT = "*, ast_participants(id,first_name,last_name), ast_ndis_plans(id,start,end), ast_support_categories(*), ast_users(id,first_name,last_name,email)";
+/** Service rows with their charge items and charge item sets, as every service listing publishes them. */
+async function serviceRows(rows: any[]) {
+  const ids = rows.map((s) => s.id);
+  if (!ids.length) return [];
+  const [items, sets] = await Promise.all([
+    db.from("ast_service_charge_items").select("service_id, ast_charge_items(*)").in("service_id", ids),
+    db.from("ast_service_charge_item_sets").select("service_id, ast_charge_item_sets(*)").in("service_id", ids),
+  ]);
+  const ci = new Map<string, any[]>(), cs = new Map<string, any[]>();
+  for (const r of must(items) as any[]) { if (!ci.has(r.service_id)) ci.set(r.service_id, []); ci.get(r.service_id)!.push(S.chargeItem(r.ast_charge_items)); }
+  for (const r of must(sets) as any[]) { if (!cs.has(r.service_id)) cs.set(r.service_id, []); cs.get(r.service_id)!.push(S.chargeItemSet(r.ast_charge_item_sets)); }
+  return rows.map((s) => S.service(s, { charge_items: ci.get(s.id) ?? [], charge_item_sets: cs.get(s.id) ?? [] }));
+}
 async function serviceFull(id: string) {
   const s = await one("ast_services", id, SVC_SELECT, "PlanService") as any;
-  const [items, sets] = await Promise.all([
-    db.from("ast_service_charge_items").select("ast_charge_items(*)").eq("service_id", id),
-    db.from("ast_service_charge_item_sets").select("ast_charge_item_sets(*)").eq("service_id", id),
-  ]);
-  return { data: S.service(s, { charge_items: (must(items) as any[]).map((r) => S.chargeItem(r.ast_charge_items)), charge_item_sets: (must(sets) as any[]).map((r) => S.chargeItemSet(r.ast_charge_item_sets)) }) };
+  return { data: (await serviceRows([s]))[0] };
 }
 route("POST", `${V}/ndis-plans/:plan/services`, async (c) => {
   const planId = idOf(c, "plan", "NdisPlan"); const plan = await one("ast_ndis_plans", planId, "*", "NdisPlan") as any;
@@ -315,7 +324,7 @@ route("GET", `${V}/services`, async (c) => {
   }
   const [col, asc] = sortOf(c, { name: "name", start: "start", end: "end", amount: "amount", created_at: "created_at" }, "name");
   const { rows, total } = await run(qb.order(col, { ascending: asc }).order("id"), p);
-  return listOf(rows.map((s: any) => S.service(s)), total, p, ["name", "start", "end", "amount", "created_at"]);
+  return listOf(await serviceRows(rows), total, p, ["name", "start", "end", "amount", "created_at"]);
 });
 route("GET", `${V}/services/:service`, async (c) => serviceFull(idOf(c, "service", "PlanService")));
 route("GET", `${V}/budgets/:budget`, async (c) => ({ data: S.budget(await one("ast_budgets", idOf(c, "budget", "Budget"), "*", "Budget")) }));
@@ -455,7 +464,7 @@ route("GET", `${V}/tasks/:task/documents`, async (c) => { const id = idOf(c, "ta
 route("POST", `${V}/tasks/:task/documents`, async (c) => { const id = idOf(c, "task", "Task"); await one("ast_tasks", id, "id", "Task"); return addDocument(c, "task", id); });
 route("POST", `${V}/tasks/:task/notes`, async (c) => {
   const id = idOf(c, "task", "Task"); const t = await one("ast_tasks", id, "*", "Task") as any; need(c.body, ["content"]);
-  const n = must(await db.from("ast_notes").insert({ notable_type: "task", notable_id: id, author_id: c.body.author?.id ?? t.user_id, content: c.body.content, checkin_type: c.body.checkin_type ?? null, source_type: "task", source_id: id }).select("*, ast_users(id,first_name,last_name)").single()) as any;
+  const n = must(await db.from("ast_notes").insert({ notable_type: "task", notable_id: id, author_id: c.body.author?.id ?? t.user_id, content: c.body.content, checkin_type: c.body.checkin_type ?? null, source_type: "task", source_id: id }).select("*, ast_users(id,first_name,last_name,email)").single()) as any;
   if (t.participant_id) must(await db.from("ast_notes").insert({ notable_type: "participant", notable_id: t.participant_id, author_id: n.author_id, content: c.body.content, checkin_type: c.body.checkin_type ?? null, source_type: "task", source_id: id }));
   await attribute(c, [n.id]);
   return { data: { id: n.id, content: n.content, checkin_type: n.checkin_type, created_at: iso(n.created_at), author: n.ast_users ? { id: n.ast_users.id } : null } };
@@ -481,12 +490,16 @@ route("GET", `${V}/invoices`, async (c) => {
   const after = filter(c, "date_after"); if (after) qb = qb.gte("date", after);
   const before = filter(c, "date_before"); if (before) qb = qb.lte("date", before);
   const { rows, total } = await run(qb.order("date", { ascending: false }).order("number"), p);
+  return listOf(await invoiceRows(rows), total, p);
+});
+/** Invoice rows with their charges embedded, as the invoice listings publish them. */
+async function invoiceRows(rows: any[]) {
   const ids = rows.map((i: any) => i.id);
   const charges = ids.length ? must(await db.from("ast_charges").select("*, ast_charge_items(id,name,reference)").in("invoice_id", ids).order("date").order("created_at")) as any[] : [];
   const by = new Map<string, any[]>();
   for (const ch of charges) { if (!by.has(ch.invoice_id)) by.set(ch.invoice_id, []); by.get(ch.invoice_id)!.push(S.invoiceCharge(ch)); }
-  return listOf(rows.map((i: any) => S.invoice(i, { charges: by.get(i.id) ?? [] })), total, p);
-});
+  return rows.map((i: any) => S.invoice(i, { charges: by.get(i.id) ?? [] }));
+}
 route("GET", `${V}/invoices/:invoice`, async (c) => invoiceFull(idOf(c, "invoice", "Invoice")));
 route("POST", `${V}/invoices/:invoice/payment-allocations`, async (c) => {
   const id = idOf(c, "invoice", "Invoice"); const inv = await one("ast_invoices", id, "*", "Invoice") as any;
@@ -562,7 +575,7 @@ route("POST", `${V}/invoice-batches/:invoiceBatch/finalise`, async (c) => {
 route("GET", `${V}/invoice-batches/:invoiceBatch/invoices`, async (c) => {
   const id = idOf(c, "invoiceBatch", "InvoiceBatch"); await one("ast_invoice_batches", id, "id", "InvoiceBatch"); const p = paging(c);
   const { rows, total } = await run(db.from("ast_invoices").select("*", { count: "exact" }).eq("batch_id", id).order("number"), p);
-  return listOf(rows.map((i: any) => S.invoice(i)), total, p);
+  return listOf(await invoiceRows(rows), total, p);
 });
 
 // ---------------------------------------------------------------- quality: incidents, feedback, referrals
@@ -617,7 +630,7 @@ route("GET", `${V}/users/:user/documents`, async (c) => { const id = idOf(c, "us
 route("POST", `${V}/users/:user/documents`, async (c) => { const id = idOf(c, "user", "User"); await one("ast_users", id, "id", "User"); return addDocument(c, "user", id); });
 route("GET", `${V}/users/:user/notes`, async (c) => {
   const id = idOf(c, "user", "User"); await one("ast_users", id, "id", "User"); const p = paging(c);
-  const { rows, total } = await run(db.from("ast_notes").select("*, ast_users(id,first_name,last_name)", { count: "exact" }).eq("notable_type", "user").eq("notable_id", id).order("created_at", { ascending: false }), p);
+  const { rows, total } = await run(db.from("ast_notes").select("*, ast_users(id,first_name,last_name,email)", { count: "exact" }).eq("notable_type", "user").eq("notable_id", id).order("created_at", { ascending: false }), p);
   return listOf(rows.map((n: any) => ({ id: n.id, content: n.content, checkin_type: n.checkin_type, created_at: iso(n.created_at), author: n.ast_users ? { id: n.ast_users.id } : null })), total, p);
 });
 route("POST", `${V}/users/:user/notes`, async (c) => {
@@ -630,8 +643,8 @@ route("GET", `${V}/users/:user/tasks`, async (c) => {
   const { rows, total } = await run(db.from("ast_tasks").select(TASK_SELECT, { count: "exact" }).eq("user_id", id).order("start_time", { ascending: false }), p);
   return listOf(rows.map((t: any) => S.task(t)), total, p);
 });
-route("GET", `${V}/user-record-types`, async (c) => { const p = paging(c); const { rows, total } = await run(db.from("ast_user_record_types").select("*", { count: "exact" }).order("name"), p); return listOf(rows.map((t: any) => ({ id: t.id, name: t.name, expires: t.expires })), total, p); });
-route("GET", `${V}/user-record-types/:userRecordType`, async (c) => { const t = await one("ast_user_record_types", idOf(c, "userRecordType", "UserRecordType"), "*", "UserRecordType") as any; return { data: { id: t.id, name: t.name, expires: t.expires } }; });
+route("GET", `${V}/user-record-types`, async (c) => { const p = paging(c); const { rows, total } = await run(db.from("ast_user_record_types").select("*", { count: "exact" }).order("name"), p); return listOf(rows.map(S.userRecordType), total, p); });
+route("GET", `${V}/user-record-types/:userRecordType`, async (c) => { const t = await one("ast_user_record_types", idOf(c, "userRecordType", "UserRecordType"), "*", "UserRecordType") as any; return { data: S.userRecordType(t) }; });
 route("GET", `${V}/user-records`, async (c) => {
   const p = paging(c);
   let qb = db.from("ast_user_records").select("*, ast_users(id,first_name,last_name), ast_user_record_types(id,name)", { count: "exact" });
@@ -718,8 +731,8 @@ route("GET", `${V}/contacts/:contact/documents`, async (c) => { const id = idOf(
 route("POST", `${V}/contacts/:contact/documents`, async (c) => { const id = idOf(c, "contact", "Contact"); await one("ast_contacts", id, "id", "Contact"); return addDocument(c, "contact", id); });
 route("GET", `${V}/contacts/:contact/participants`, async (c) => {
   const id = idOf(c, "contact", "Contact"); await one("ast_contacts", id, "id", "Contact"); const p = paging(c);
-  const { rows, total } = await run(db.from("ast_participant_contacts").select("*, ast_participants(id,first_name,last_name,status)", { count: "exact" }).eq("contact_id", id).order("participant_id"), p);
-  return listOf(rows.map((r: any) => ({ participant: { id: r.ast_participants.id, full_name: [r.ast_participants.first_name, r.ast_participants.last_name].filter(Boolean).join(" "), status: r.ast_participants.status }, relationship: r.relationship, starred: r.starred, consent: r.consent, details: r.details, visible_to_support_workers: r.visible_to_support_workers })), total, p);
+  const { rows, total } = await run(db.from("ast_participant_contacts").select("*, ast_participants(*)", { count: "exact" }).eq("contact_id", id).order("participant_id"), p);
+  return listOf(rows.map((r: any) => ({ participant: S.participant(r.ast_participants), relationship: r.relationship, starred: r.starred, consent: r.consent, details: r.details, visible_to_support_workers: r.visible_to_support_workers })), total, p);
 });
 route("GET", `${V}/organisations`, async (c) => { const p = paging(c); let qb = db.from("ast_organisations").select("*", { count: "exact" }); const search = filter(c, "search"); if (search) qb = qb.ilike("name", `%${search}%`); const { rows, total } = await run(qb.order("name"), p); return listOf(rows.map(S.organisation), total, p); });
 route("POST", `${V}/organisations`, async (c) => { need(c.body, ["name"]); const r = must(await db.from("ast_organisations").insert(pick(c.body, ["name", "type", "abn", "email", "phone", "website", "description", "ndis_registered", "registration_number"])).select().single()) as any; await attribute(c, [r.id]); return { data: S.organisation(r) }; });
@@ -734,10 +747,10 @@ route("GET", `${V}/plan-managers/:planManager`, async (c) => ({ data: S.planMana
 route("PUT", `${V}/plan-managers/:planManager`, async (c) => { const id = idOf(c, "planManager", "PlanManager"); await one("ast_plan_managers", id, "id", "PlanManager"); must(await db.from("ast_plan_managers").update(pick(c.body, ["name", "invoice_email", "phone", "abn"])).eq("id", id)); await attribute(c, [id]); return { data: S.planManager(await one("ast_plan_managers", id)) }; });
 route("GET", `${V}/plan-managers/:planManager/documents`, async (c) => { const id = idOf(c, "planManager", "PlanManager"); await one("ast_plan_managers", id, "id", "PlanManager"); return documentsFor(c, "plan_manager", id); });
 route("POST", `${V}/plan-managers/:planManager/documents`, async (c) => { const id = idOf(c, "planManager", "PlanManager"); await one("ast_plan_managers", id, "id", "PlanManager"); return addDocument(c, "plan_manager", id); });
-route("GET", `${V}/sites`, async (c) => { const p = paging(c); const { rows, total } = await run(db.from("ast_sites").select("*, ast_users(id,first_name,last_name)", { count: "exact" }).is("archived_at", null).order("name"), p); return listOf(rows.map(S.site), total, p); });
-route("POST", `${V}/sites`, async (c) => { need(c.body, ["name"]); oneOf(c.body, "type", ["other", "sil_house"]); const row = pick(c.body, ["name", "type", "description", "capacity", "default_support_type"]); if (c.body.site_manager?.id) row.site_manager_id = c.body.site_manager.id; if (c.body.address) Object.assign(row, pick(c.body.address, ["address_1", "suburb", "state", "postcode"])); const r = must(await db.from("ast_sites").insert(row).select("id").single()) as any; await attribute(c, [r.id]); return { data: S.site(await one("ast_sites", r.id, "*, ast_users(id,first_name,last_name)")) }; });
-route("GET", `${V}/sites/:site`, async (c) => ({ data: S.site(await one("ast_sites", idOf(c, "site", "Site"), "*, ast_users(id,first_name,last_name)", "Site")) }));
-route("PUT", `${V}/sites/:site`, async (c) => { const id = idOf(c, "site", "Site"); await one("ast_sites", id, "id", "Site"); const row = pick(c.body, ["name", "type", "description", "capacity", "default_support_type"]); if (c.body.site_manager !== undefined) row.site_manager_id = c.body.site_manager?.id ?? null; if (c.body.address) Object.assign(row, pick(c.body.address, ["address_1", "suburb", "state", "postcode"])); if (Object.keys(row).length) must(await db.from("ast_sites").update(row).eq("id", id)); await attribute(c, [id]); return { data: S.site(await one("ast_sites", id, "*, ast_users(id,first_name,last_name)")) }; });
+route("GET", `${V}/sites`, async (c) => { const p = paging(c); const { rows, total } = await run(db.from("ast_sites").select("*, ast_users(id,first_name,last_name,email)", { count: "exact" }).is("archived_at", null).order("name"), p); return listOf(rows.map(S.site), total, p); });
+route("POST", `${V}/sites`, async (c) => { need(c.body, ["name"]); oneOf(c.body, "type", ["other", "sil_house"]); const row = pick(c.body, ["name", "type", "description", "capacity", "default_support_type"]); if (c.body.site_manager?.id) row.site_manager_id = c.body.site_manager.id; if (c.body.address) Object.assign(row, pick(c.body.address, ["address_1", "suburb", "state", "postcode"])); const r = must(await db.from("ast_sites").insert(row).select("id").single()) as any; await attribute(c, [r.id]); return { data: S.site(await one("ast_sites", r.id, "*, ast_users(id,first_name,last_name,email)")) }; });
+route("GET", `${V}/sites/:site`, async (c) => ({ data: S.site(await one("ast_sites", idOf(c, "site", "Site"), "*, ast_users(id,first_name,last_name,email)", "Site")) }));
+route("PUT", `${V}/sites/:site`, async (c) => { const id = idOf(c, "site", "Site"); await one("ast_sites", id, "id", "Site"); const row = pick(c.body, ["name", "type", "description", "capacity", "default_support_type"]); if (c.body.site_manager !== undefined) row.site_manager_id = c.body.site_manager?.id ?? null; if (c.body.address) Object.assign(row, pick(c.body.address, ["address_1", "suburb", "state", "postcode"])); if (Object.keys(row).length) must(await db.from("ast_sites").update(row).eq("id", id)); await attribute(c, [id]); return { data: S.site(await one("ast_sites", id, "*, ast_users(id,first_name,last_name,email)")) }; });
 route("GET", `${V}/sites/:site/documents`, async (c) => { const id = idOf(c, "site", "Site"); await one("ast_sites", id, "id", "Site"); return documentsFor(c, "site", id); });
 route("POST", `${V}/sites/:site/documents`, async (c) => { const id = idOf(c, "site", "Site"); await one("ast_sites", id, "id", "Site"); return addDocument(c, "site", id); });
 route("GET", `${V}/sites/:site/participants`, async (c) => {
@@ -759,7 +772,7 @@ route("PUT", `${V}/document-categories/:documentCategory`, async (c) => { const 
 route("GET", `${V}/forms`, async (c) => { const p = paging(c); const { rows, total } = await run(db.from("ast_forms").select("*", { count: "exact" }).order("name"), p); return listOf(rows.map(S.form), total, p); });
 route("GET", `${V}/form-submissions`, async (c) => { const p = paging(c); const { rows, total } = await run(db.from("ast_form_submissions").select("*, ast_forms(*)", { count: "exact" }).order("submitted_at", { ascending: false }), p); return listOf(rows.map(S.formSubmission), total, p); });
 route("GET", `${V}/form-submissions/:formSubmission`, async (c) => ({ data: S.formSubmission(await one("ast_form_submissions", idOf(c, "formSubmission", "FormSubmission"), "*, ast_forms(*)", "FormSubmission")) }));
-const SIG_SELECT = "*, ast_users!ast_signature_requests_owner_id_fkey(id,first_name,last_name,email), ast_participants(id,first_name,last_name)";
+const SIG_SELECT = "*, ast_users(id,first_name,last_name,email), ast_participants(id,first_name,last_name)";
 route("GET", `${V}/signature-requests`, async (c) => { const p = paging(c); const { rows, total } = await run(db.from("ast_signature_requests").select(SIG_SELECT, { count: "exact" }).order("created_at", { ascending: false }), p); return listOf(rows.map(S.signatureRequest), total, p); });
 route("GET", `${V}/signature-requests/:signatureRequest`, async (c) => ({ data: S.signatureRequest(await one("ast_signature_requests", idOf(c, "signatureRequest", "SignatureRequest"), SIG_SELECT, "SignatureRequest")) }));
 route("GET", `${V}/public-holidays`, async (c) => { const p = paging(c); const { rows, total } = await run(db.from("ast_public_holidays").select("*", { count: "exact" }).order("date"), p); return listOf(rows.map(S.publicHoliday), total, p); });
