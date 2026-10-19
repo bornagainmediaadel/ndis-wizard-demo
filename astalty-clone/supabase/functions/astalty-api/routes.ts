@@ -1,7 +1,7 @@
 // Astalty clone · route handlers for /public/v1
 import { ApiError, attribute, csv, Ctx, db, emit, filter, invalid, iso, listOf, must, need, notFound, one, oneOf, paging, parseWhen, pick, q, run, sortOf, TZ, todayIn } from "./lib.ts";
 import * as S from "./shapes.ts";
-import { matchSpec, serialize, validate } from "./serialize.ts";
+import { matchSpec, serialize, specOps, validate } from "./serialize.ts";
 
 type Handler = (c: Ctx) => Promise<unknown>;
 export const ROUTES: { method: string; re: RegExp; keys: string[]; fn: Handler; pattern: string }[] = [];
@@ -873,6 +873,5 @@ route("GET", `/_replica/conformance`, async (c) => {
       results.push({ path: full, ok: problems.length === 0, problems: problems.slice(0, 12) });
     } catch (e) { results.push({ path: full, error: String((e as Error).message) }); }
   }
-  return { checked: results.length, passed: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok), spec_operations: specOpsCount() };
+  return { checked: results.length, passed: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok), spec_operations: specOps().length };
 });
-function specOpsCount() { return (globalThis as any).__ast_ops_count ?? null; }
