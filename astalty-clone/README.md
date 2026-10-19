@@ -33,6 +33,19 @@ The replica is meant to be swapped for the real API by changing only `ASTALTY_AP
   model [...]`, `The route ... could not be found.`, validation `message` + `errors`).
 - `GET /_replica/conformance` replays 82 representative requests through the pipeline and validates every
   response against the schema (required properties, types, enums, timestamp format). It passes 82/82.
+- `GET /_replica/compare` (headers `x-real-token`, optional `x-real-base`) replays the same requests against a
+  real Astalty account and reports structural differences only: JSON paths, value kinds, `allowed_sorts`,
+  content types. Never values. Checked against a live read-only account on 2026-10-19: 66 requests compared,
+  none differing; 16 could not be compared because that account has no goals, risks, incidents, feedback,
+  referrals, sites, contacts or organisations and webhooks are not enabled on it.
+- Behaviour learned from the live API and copied here, beyond what the document says: calendar dates
+  (plan, service, budget and record dates, invoice dates) are midnight in the account's timezone expressed
+  in UTC (end dates 23:59:59), so a plan starting on the 20th arrives as the 19th, 13:30 UTC for an Adelaide
+  account; tasks are dated at midnight UTC; `plan.start`/`plan.end` inside a service stay `YYYY-MM-DD`;
+  participant notes carry `updated_at`; every list publishes the live API's `allowed_sorts` and accepts
+  exactly those; shifts embed their support's travels and nested shifts omit `support`, `group_support` and
+  `internal_event`; `GET /documents/{id}/download` streams a PDF with a `Content-Disposition` attachment.
+  The live API allows 60 requests a minute per token.
 - What the data cannot express is left honest rather than invented: the public API has no invoice payment
   state, no staff phone numbers and no incident-to-shift link, so the Wizard sees the same gaps it would see
   against the real account.
@@ -49,7 +62,9 @@ The replica is meant to be swapped for the real API by changing only `ASTALTY_AP
 
 ## Pointing the Wizard at Astalty
 
-`wizard_config` holds `ASTALTY_API_BASE` and `ASTALTY_API_KEY`. Any Wizard API call made with
+`wizard_config` holds `ASTALTY_API_BASE` and `ASTALTY_API_KEY`. To run against a real account, change only
+those two values. The Astalty feed converts dates in the account's own timezone (learned from its supports;
+Adelaide by default). Any Wizard API call made with
 `?source=astalty` reads the Astalty clone instead of ShiftCare; without it nothing changes.
 Setting `WIZARD_SOURCE=astalty` in `wizard_config` flips the default for every call. The demo
 page passes the switch through when it is opened with `?source=astalty`.

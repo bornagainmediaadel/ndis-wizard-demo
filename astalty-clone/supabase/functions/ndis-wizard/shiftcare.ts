@@ -36,7 +36,7 @@ export class ShiftCare {
       // minute. Only the clone (an edge function in the same project) hits this; live ShiftCare
       // is an external API. The caller resumes in a fresh request with the cached responses.
       const m = /Rate limit exceeded for trace.*?Retry after (\d+)ms/i.exec(String((e as Error)?.message || e));
-      if (m) throw new BudgetError(Number(m[1]));
+      if (m) throw new BudgetError(Number(m[1]), this.label);
       throw e;
     }
     if ((r.status === 429 || r.status >= 500) && attempt < 3) {
@@ -104,7 +104,7 @@ export class ShiftCare {
 }
 
 export class BudgetError extends Error {
-  constructor(public retryAfterMs: number) { super("Fetched part of the ShiftCare data. Continuing in a new request."); }
+  constructor(public retryAfterMs: number, label = "ShiftCare") { super(`Fetched part of the ${label} data. Continuing in a new request.`); }
 }
 export class SCError extends Error {
   constructor(public status: number, msg: string) { super(msg); }
